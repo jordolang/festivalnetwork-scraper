@@ -1,0 +1,20 @@
+{
+  "business_name": "Your Salsa Company LLC",
+  "contact_name": "First Last",
+  "address": "123 Main St",
+  "city": "Zanesville",
+  "state": "OH",
+  "zip": "43701",
+  "phone": "(740) 555-0100",
+  "email": "you@example.com",
+  "website": "https://example.com",
+  "product_description": "Small-batch gourmet salsa, sold in sealed retail jars.",
+  "category": "Packaged food / gourmet food product",
+  "booth_size": "10x10",
+  "electric_needed": "No",
+  "years_in_business": "5",
+  "tax_id": "",
+  "vendors_license": "",
+  "insurance_carrier": "",
+  "signature_date": ""
+}

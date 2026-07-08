@@ -7,7 +7,8 @@ import logging
 import sys
 from pathlib import Path
 
-from . import config, export, persist, pipeline, report, tui
+from . import apps, config, export, importer, pdf_fill, persist, pipeline, report, tui
+from .http import Fetcher
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -45,7 +46,87 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def build_apply_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        prog="fnscraper apply",
+        description=(
+            "Import an exported show list (.csv/.xlsx/.md), locate each "
+            "listing's promoter website, download vendor applications, and "
+            "auto-fill fillable PDFs into applications/."
+        ),
+    )
+    p.add_argument("import_file", nargs="?", default="reports/selected_shows.csv",
+                   help="Exported list to import "
+                        "(default: reports/selected_shows.csv)")
+    p.add_argument("--out", default="applications",
+                   help="Directory for downloaded/filled applications "
+                        "(default: applications/)")
+    p.add_argument("--limit", type=int, default=None,
+                   help="Only process the first N shows")
+    p.add_argument("--refresh", action="store_true",
+                   help="Ignore the HTTP cache")
+    p.add_argument("--no-search", action="store_true",
+                   help="Don't fall back to a web search when the listing "
+                        "has no public promoter website")
+    p.add_argument("-v", "--verbose", action="store_true")
+    return p
+
+
+def apply_main(argv: list[str]) -> int:
+    args = build_apply_parser().parse_args(argv)
+    logging.basicConfig(
+        level=logging.DEBUG if args.verbose else logging.INFO,
+        format="%(levelname)s %(name)s: %(message)s",
+    )
+    try:
+        shows = importer.load_shows(args.import_file)
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"Cannot import {args.import_file}: {exc}")
+        print("Export a selection first (run the picker), or pass a path to "
+              "a selected_shows .csv/.xlsx/.md file.")
+        return 1
+    if args.limit:
+        shows = shows[: args.limit]
+
+    pdf_fill.write_example_profile(".")
+    profile, is_real = pdf_fill.load_profile(".")
+
+    settings = config.Settings.from_env(refresh=args.refresh)
+    fetcher = Fetcher(cache_dir=settings.cache_dir, refresh=args.refresh)
+    if settings.username and settings.password:
+        fetcher.login(settings.username, settings.password)
+
+    hunter = apps.ApplicationHunter(
+        fetcher, out_dir=args.out, profile=profile, profile_is_real=is_real,
+        search_fallback=not args.no_search,
+    )
+    results = hunter.run(shows)
+
+    print(f"\nProcessed {len(results)} show(s):")
+    for r in results:
+        bits = []
+        if r.filled:
+            bits.append(f"{len(r.filled)} PDF(s) auto-filled")
+        if r.downloaded:
+            bits.append(f"{len(r.downloaded)} downloaded")
+        if r.online_forms:
+            bits.append(f"{len(r.online_forms)} online form(s) to fill in browser")
+        if not bits:
+            bits.append("no application found — check the listing")
+        print(f"  {r.name}: " + ", ".join(bits))
+    print(f"\nEverything saved under {args.out}/ — see {args.out}/INDEX.md")
+    if not is_real:
+        print("NOTE: filled with placeholder data. Copy "
+              "vendor_profile.example.json to vendor_profile.json, edit it, "
+              "and re-run.")
+    print("Review every auto-filled PDF before sending it to a promoter.")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
+    argv = list(sys.argv[1:]) if argv is None else list(argv)
+    if argv[:1] == ["apply"]:
+        return apply_main(argv[1:])
     args = build_parser().parse_args(argv)
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,

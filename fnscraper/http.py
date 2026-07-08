@@ -83,12 +83,49 @@ class Fetcher:
                     time.sleep(wait)
                     continue
                 resp.raise_for_status()
+                # Non-retryable non-200 (e.g. 202 bot challenge): give up now.
+                raise RuntimeError(f"HTTP {resp.status_code} for {url}")
             except requests.RequestException as exc:
                 if attempt == 2:
                     raise
                 log.warning("Request error for %s (%s); retrying", url, exc)
                 time.sleep(5 * (attempt + 1))
         raise RuntimeError(f"Failed to fetch {url} after retries")
+
+    def get_bytes(self, url: str, max_bytes: int = 30_000_000) -> bytes:
+        """Fetch a binary resource (PDF, DOC).  Cached on disk like get()."""
+        cache = self._cache_path(url).with_suffix(".bin")
+        if not self.refresh and cache.exists():
+            return cache.read_bytes()
+        self._throttle()
+        resp = self.session.get(
+            url, timeout=config.REQUEST_TIMEOUT, stream=True
+        )
+        self._last_request = time.time()
+        resp.raise_for_status()
+        chunks, size = [], 0
+        for chunk in resp.iter_content(65536):
+            size += len(chunk)
+            if size > max_bytes:
+                raise RuntimeError(f"{url} exceeds {max_bytes} bytes")
+            chunks.append(chunk)
+        data = b"".join(chunks)
+        cache.write_bytes(data)
+        return data
+
+    def resolve_redirect(self, url: str) -> str | None:
+        """Return the Location a URL redirects to, without following further."""
+        self._throttle()
+        try:
+            resp = self.session.get(
+                url, timeout=config.REQUEST_TIMEOUT, allow_redirects=False
+            )
+            self._last_request = time.time()
+            if resp.is_redirect or resp.is_permanent_redirect:
+                return resp.headers.get("Location")
+        except requests.RequestException as exc:
+            log.debug("redirect probe failed for %s: %s", url, exc)
+        return None
 
     # -- optional Pro login --------------------------------------------
     def login(self, username: str, password: str) -> bool:

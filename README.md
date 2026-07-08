@@ -133,6 +133,55 @@ don't touch the site. `robots.txt` permits this crawl (only `/stats/` and
 FestivalNet's terms — the data stays on your machine for your own show
 planning.
 
+## Applying to shows: import + application autofill
+
+Once you've exported a selection, hand it back to the tool and it will go
+get the applications:
+
+```bash
+python -m fnscraper apply                          # uses reports/selected_shows.csv
+python -m fnscraper apply reports/selected_shows.xlsx
+python -m fnscraper apply my_picks.md --limit 3
+```
+
+Any of the three export formats imports losslessly. For each show it:
+
+1. **Re-locates the listing** on FestivalNet and extracts the promoter's
+   website (decoding FestivalNet's redirect slugs). If the public listing
+   hides the website, it falls back to a web search and only accepts a
+   site after verifying the event is actually named on it
+   (`--no-search` disables this).
+2. **Hunts for applications** — crawls the promoter site shallowly,
+   scoring links for vendor/exhibitor application language (and
+   penalizing permits, sponsorships, volunteer forms), downloading
+   matching PDFs/DOCs and recording online forms (Jotform, Google Forms,
+   Zapplication, Eventeny, …).
+3. **Auto-fills fillable PDFs** from your `vendor_profile.json` (copy
+   `vendor_profile.example.json`, fill in your business info) using fuzzy
+   field matching — "Business Name", "Company", "biz_name" all map
+   correctly. Flat/scanned PDFs and online forms get an `ANSWERS.md`
+   copy-paste sheet instead.
+
+Everything lands in the repo under `applications/`:
+
+```
+applications/
+  INDEX.md                                  # status of every show
+  manifest.json
+  2026-07-10_OH_Walkabout-Tremont-July/
+    README.md                               # dates, deadlines, links, notes
+    downloads/VendorApplication.pdf         # as downloaded
+    VendorApplication__FILLED.pdf           # auto-filled — REVIEW FIRST
+    ANSWERS.md                              # copy-paste sheet for web forms
+```
+
+`applications/` and `vendor_profile.json` are gitignored by default since
+they contain your personal contact info — delete those lines from
+`.gitignore` if you want them committed.
+
+**Always review an auto-filled application before sending it.** Promoters
+notice sloppy applications, and no field-matcher is perfect.
+
 ## Tests
 
 ```bash

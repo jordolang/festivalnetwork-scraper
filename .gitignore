@@ -6,3 +6,9 @@ reports/
 .venv/
 venv/
 .env
+
+# Contains your real contact info — keep it out of version control.
+vendor_profile.json
+# Downloaded/filled applications carry personal data; remove this line
+# if you want them committed.
+applications/
