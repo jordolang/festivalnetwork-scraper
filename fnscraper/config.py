@@ -68,6 +68,7 @@ MAX_DAYTRIP_HOURS = 2.5
 # Revenue model for a salsa vendor
 # ---------------------------------------------------------------------------
 AVG_SALE = 10.0            # average transaction (jar or two of salsa)
+JAR_PRICE = 8.0            # retail price of a single jar
 UNIT_COST_RATIO = 0.35     # cost of goods sold as fraction of revenue
 
 # Fraction of attendees who buy from a given food-product booth at a

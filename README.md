@@ -16,11 +16,40 @@ pip install -r requirements.txt
 python -m fnscraper --weeks 8
 ```
 
-Outputs:
+When the scrape finishes (in a real terminal) an **interactive picker**
+opens: a scrolling checkbox list of every qualifying show, sorted by
+**state, then date, then cost**. Each row shows the estimated
+**out-of-pocket cost to sell one jar of salsa** (`$/JAR`), the total cost
+of doing the show, drive time, location, date, and name:
+
+```
+    ST  DATE             $/JAR     SHOW $   DRIVE  EVENT
+[x] OH  Jul 10-11        $1.96       $734    1.8h  Summit County Italian American Festival — Akron
+[ ] OH  Jul 11-12        $1.79       $499    2.3h  Youngstown Summer Festival of the Arts — Youngstown
+```
+
+Keys: **SPACE** checks/unchecks the show next to the cursor (arrow keys /
+PgUp / PgDn scroll), **ENTER** saves your picks and exits, `q` quits
+without saving. Reopen the same list later without re-scraping:
+
+```bash
+python -m fnscraper --browse
+```
+
+When you save, your checked shows are exported with **every data field**
+(50 columns — identity, dates, location, attendance, exhibitors, fees,
+all cost components, profit estimates, notes) to:
+
+- `reports/selected_shows.xlsx` — spreadsheet (bold header, freeze pane, filters, currency formatting)
+- `reports/selected_shows.csv`
+- `reports/selected_shows.md` — markdown table
+- `reports/shortlist.md` — a readable per-show summary with apply deadlines and links
+
+Every full run also writes:
 
 - `reports/weekend_picks.md` — top picks for each upcoming weekend
-- `reports/all_events.csv` — every scored event with the full cost/revenue breakdown
-- A console summary of the best pick per weekend
+- `reports/all_events.csv` — every scored event, all fields
+- `reports/results.json` — saved results that power `--browse`
 
 Useful flags:
 
@@ -29,6 +58,8 @@ python -m fnscraper --weeks 12 --top 8          # longer horizon, more picks
 python -m fnscraper --states Ohio Pennsylvania  # limit the crawl
 python -m fnscraper --max-drive-hours 6         # tighter radius
 python -m fnscraper --refresh                   # ignore the page cache
+python -m fnscraper --no-pick                   # skip the picker, print the list
+python -m fnscraper --browse                    # reopen picker on last results
 ```
 
 ## The algorithm

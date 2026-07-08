@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import argparse
 import logging
+import sys
 from pathlib import Path
 
-from . import config, pipeline, report
+from . import config, export, persist, pipeline, report, tui
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -31,6 +32,13 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Output directory (default: reports/)")
     p.add_argument("--refresh", action="store_true",
                    help="Ignore the HTTP cache and re-fetch everything")
+    p.add_argument("--pick", action="store_true",
+                   help="Force the interactive show picker")
+    p.add_argument("--no-pick", action="store_true",
+                   help="Skip the picker; print the list and write reports")
+    p.add_argument("--browse", action="store_true",
+                   help="Reopen the picker on the last scrape's results "
+                        "without hitting the network")
     p.add_argument("--max-pages-per-state", type=int,
                    default=config.MAX_PAGES_PER_STATE, help=argparse.SUPPRESS)
     p.add_argument("-v", "--verbose", action="store_true")
@@ -55,20 +63,49 @@ def main(argv: list[str] | None = None) -> int:
     if args.states:
         settings.states = args.states
 
-    scored = pipeline.run(settings)
-    if not scored:
-        print("No qualifying events found. Try --weeks or --refresh.")
-        return 1
-
-    weekends = pipeline.group_by_weekend(scored)
     out_dir = Path(settings.output_dir)
-    report.write_csv(scored, out_dir / "all_events.csv")
-    md = report.write_weekend_report(
-        weekends, out_dir, settings.top_per_weekend, settings.max_drive_hours
-    )
-    report.print_summary(weekends, settings.top_per_weekend)
-    print(f"\nFull report: {md}")
+    results_path = out_dir / "results.json"
+
+    if args.browse:
+        if not results_path.exists():
+            print(f"No saved results at {results_path}; run a scrape first.")
+            return 1
+        scored = persist.load_results(results_path)
+    else:
+        scored = pipeline.run(settings)
+        if not scored:
+            print("No qualifying events found. Try --weeks or --refresh.")
+            return 1
+        persist.save_results(scored, results_path)
+        weekends = pipeline.group_by_weekend(scored)
+        export.export_csv(scored, out_dir / "all_events.csv")
+        report.write_weekend_report(
+            weekends, out_dir, settings.top_per_weekend, settings.max_drive_hours
+        )
+
+    # Interactive picker: on by default when attached to a real terminal.
+    interactive = args.pick or (sys.stdout.isatty() and not args.no_pick)
+    if interactive:
+        selected = tui.run_picker(scored)
+        if selected is None:
+            print("Picker closed without saving.")
+        elif not selected:
+            print("No shows selected.")
+        else:
+            shortlist = report.write_shortlist(selected, out_dir)
+            exported = export.export_all(selected, out_dir, "selected_shows")
+            print(f"\n{len(selected)} show(s) selected:\n")
+            tui.print_plain_list(selected)
+            print(f"\nShortlist (readable): {shortlist}")
+            print("Full-data exports (every field):")
+            for p in exported:
+                print(f"  {p}")
+    else:
+        tui.print_plain_list(scored)
+
+    print(f"\nWeekend report: {out_dir / 'weekend_picks.md'}")
     print(f"All {len(scored)} scored events: {out_dir / 'all_events.csv'}")
+    print(f"Reopen this list anytime: python -m fnscraper --browse")
     return 0
 
 

@@ -76,6 +76,9 @@ class ScoreBreakdown:
     roi: float = 0.0                 # profit per out-of-pocket dollar
     score: float = 0.0               # final ranking score
 
+    jars_sold: float = 0.0           # estimated jars moved at the show
+    cost_per_jar: float = 0.0        # out-of-pocket cost to sell one jar
+
     notes: list[str] = field(default_factory=list)
 
 

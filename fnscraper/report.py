@@ -1,8 +1,7 @@
-"""Report generation: per-weekend markdown + a master CSV."""
+"""Report generation: per-weekend markdown + human-readable shortlist."""
 
 from __future__ import annotations
 
-import csv
 from datetime import date
 from pathlib import Path
 
@@ -20,37 +19,6 @@ def _date_range(s: ScoredEvent) -> str:
     if ev.start_date:
         return f"{ev.start_date:%a %b %-d}"
     return "?"
-
-
-def write_csv(scored: list[ScoredEvent], path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fields = [
-        "score", "est_profit", "roi", "total_cost", "gross_revenue",
-        "name", "start_date", "end_date", "city", "state",
-        "drive_hours", "distance_miles", "category",
-        "attendance", "exhibitors", "admission",
-        "booth_fee", "booth_fee_estimated", "fuel_cost", "lodging_cost",
-        "meals_cost", "juried", "deadlines", "promoter", "url", "notes",
-    ]
-    with path.open("w", newline="") as fh:
-        w = csv.writer(fh)
-        w.writerow(fields)
-        for s in scored:
-            e, b = s.event, s.breakdown
-            w.writerow([
-                round(b.score, 1), round(b.est_profit, 0), round(b.roi, 2),
-                round(b.total_cost, 0), round(b.gross_revenue, 0),
-                e.name, e.start_date, e.end_date, e.city, e.state,
-                round(e.drive_hours or 0, 1), round(e.distance_miles or 0),
-                e.category_slug,
-                e.attendance if e.attendance else "est",
-                e.exhibitors if e.exhibitors else "est",
-                e.admission,
-                round(b.booth_fee), b.booth_fee_estimated,
-                round(b.fuel_cost), round(b.lodging_cost), round(b.meals_cost),
-                e.juried, e.deadlines, e.promoter, e.url,
-                "; ".join(b.notes),
-            ])
 
 
 def write_weekend_report(
@@ -103,6 +71,37 @@ def write_weekend_report(
     lines.append("---")
     lines.append("`*` attendance undisclosed, tier default used. "
                  "`~` booth fee estimated from attendance tier.")
+    path.write_text("\n".join(lines))
+    return path
+
+
+def write_shortlist(selected: list[ScoredEvent], out_dir: Path) -> Path:
+    """Human-readable summary of the shows checked in the picker."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / "shortlist.md"
+    lines = ["# Selected shows", ""]
+    for s in selected:
+        e, b = s.event, s.breakdown
+        when = f"{e.start_date:%a %b %-d, %Y}" if e.start_date else "?"
+        if e.end_date and e.end_date != e.start_date:
+            when += f" – {e.end_date:%a %b %-d}"
+        cpj = (f"${b.cost_per_jar:,.2f}"
+               if b.cost_per_jar != float("inf") else "n/a")
+        lines += [
+            f"## {e.name}",
+            f"- **When:** {when}  ({e.hours_text or 'hours n/a'})",
+            f"- **Where:** {e.address or f'{e.city}, {e.state}'}"
+            f"  ({e.drive_hours or 0:.1f} h drive)",
+            f"- **Cost to sell one jar:** {cpj}"
+            f"  |  show cost: {_fmt_money(b.total_cost)}"
+            f"  (booth {_fmt_money(b.booth_fee)}"
+            f"{'~' if b.booth_fee_estimated else ''}, fuel {_fmt_money(b.fuel_cost)},"
+            f" lodging {_fmt_money(b.lodging_cost)}, meals {_fmt_money(b.meals_cost)})",
+            f"- **Estimated:** {b.jars_sold:,.0f} jars, "
+            f"{_fmt_money(b.est_profit)} profit ({b.roi:.1f}x)",
+            f"- **Apply:** {e.deadlines or 'see listing'}  |  {e.url}",
+            "",
+        ]
     path.write_text("\n".join(lines))
     return path
 

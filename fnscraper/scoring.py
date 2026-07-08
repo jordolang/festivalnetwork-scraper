@@ -141,6 +141,9 @@ def score_event(event: Event) -> ScoredEvent:
     b.est_profit = b.gross_revenue - b.cogs - b.total_cost
     b.roi = b.est_profit / b.total_cost if b.total_cost > 0 else 0.0
 
+    b.jars_sold = b.gross_revenue / config.JAR_PRICE
+    b.cost_per_jar = b.total_cost / b.jars_sold if b.jars_sold > 0 else float("inf")
+
     if b.est_profit <= 0 or b.roi <= 0:
         b.score = b.est_profit          # negative: sinks to the bottom
     else:
