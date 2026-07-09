@@ -39,6 +39,25 @@ def test_format_row_shows_jar_cost_show_cost_location_date_name():
     assert "[ ]" in format_row(s, checked=False)
 
 
+def test_format_row_shows_booth_fee_on_its_own():
+    s = scored()
+    b = s.breakdown
+    assert b.booth_fee < b.total_cost          # booth is only part of the trip cost
+    line = format_row(s, checked=False)
+    # ~ prefix marks an estimated fee (no Pro login in the test fixture).
+    assert b.booth_fee_estimated
+    assert f"~${b.booth_fee:,.0f}" in line
+
+
+def test_format_row_marks_real_booth_fee_without_tilde():
+    s = scored()
+    s.breakdown.booth_fee = 200.0
+    s.breakdown.booth_fee_estimated = False
+    line = format_row(s, checked=False)
+    assert "$200" in line
+    assert "~$200" not in line
+
+
 def test_persist_roundtrip(tmp_path):
     original = [scored(), scored(event_id="2", attendance=None)]
     path = persist.save_results(original, tmp_path / "results.json")

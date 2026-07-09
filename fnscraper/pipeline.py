@@ -69,16 +69,34 @@ def run(settings: config.Settings) -> list[ScoredEvent]:
 
     # 3. Rough distance pre-filter on city coordinates so we don't fetch
     #    detail pages for events obviously out of range.
-    in_range: list[Event] = []
+    #
+    #    Geocoding is the slow stage: Nominatim is rate-limited to ~1 req/s.
+    #    Hundreds of events share a handful of cities, so we resolve each
+    #    distinct (city, state) once and fan the result back out to every
+    #    event there.  This makes the loop iterate real network work (one
+    #    tick per city) instead of racing through cache hits and then
+    #    appearing to stall on the first uncached city.
+    by_city: dict[tuple[str, str], list[Event]] = {}
     for ev in upcoming:
-        lat, lon, approx = geocoder.locate(ev.city, ev.state)
-        ev.lat, ev.lon = lat, lon
+        by_city.setdefault((ev.city, ev.state), []).append(ev)
+    log.info("geocoding %d distinct cities across %d events",
+             len(by_city), len(upcoming))
+
+    in_range: list[Event] = []
+    for i, ((city, state), evs) in enumerate(by_city.items(), 1):
+        lat, lon, approx = geocoder.locate(city, state)
         miles, hours = drive_estimate(lat, lon)
-        ev.distance_miles, ev.drive_hours = miles, hours
         # Give state-centroid approximations 25% slack before discarding.
         limit = settings.max_drive_hours * (1.25 if approx else 1.0)
-        if hours <= limit:
-            in_range.append(ev)
+        for ev in evs:
+            ev.lat, ev.lon = lat, lon
+            ev.distance_miles, ev.drive_hours = miles, hours
+            if hours <= limit:
+                in_range.append(ev)
+        if i % 50 == 0:
+            log.info("geocoding: %d/%d cities (%d events in range so far)",
+                     i, len(by_city), len(in_range))
+    geocoder.flush()
     log.info("%d events within ~%.0f h drive of %s",
              len(in_range), settings.max_drive_hours, config.HOME_NAME)
 

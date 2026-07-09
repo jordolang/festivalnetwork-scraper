@@ -66,7 +66,7 @@ def _rows(scored: list[ScoredEvent]) -> tuple[list[str], list[list]]:
 def export_csv(scored: list[ScoredEvent], path: Path) -> Path:
     cols, rows = _rows(scored)
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", newline="") as fh:
+    with path.open("w", newline="", encoding="utf-8-sig") as fh:
         w = csv.writer(fh)
         w.writerow(cols)
         w.writerows(rows)
@@ -86,7 +86,7 @@ def export_markdown(scored: list[ScoredEvent], path: Path) -> Path:
         cells = [str(c).replace("|", "\\|").replace("\n", " ") for c in row]
         lines.append("| " + " | ".join(cells) + " |")
     lines.append("")
-    path.write_text("\n".join(lines))
+    path.write_text("\n".join(lines), encoding="utf-8")
     return path
 
 
