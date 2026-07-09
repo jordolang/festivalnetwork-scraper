@@ -57,11 +57,28 @@ class Geocoder:
             except json.JSONDecodeError:
                 self._cache = {}
         self._last_nominatim = 0.0
+        self._dirty = 0
         self.session = requests.Session()
         self.session.headers["User-Agent"] = config.USER_AGENT
 
+    # Write the cache to disk at most once every this many new lookups.
+    # A crash loses only the trailing few entries (each ~1 s to recompute),
+    # in exchange for not rewriting the whole file on every single lookup.
+    _SAVE_EVERY = 25
+
     def _save(self) -> None:
         self.cache_path.write_text(json.dumps(self._cache, indent=0))
+
+    def _mark_dirty(self) -> None:
+        self._dirty += 1
+        if self._dirty >= self._SAVE_EVERY:
+            self.flush()
+
+    def flush(self) -> None:
+        """Persist any buffered cache entries.  Call when a batch finishes."""
+        if self._dirty:
+            self._save()
+            self._dirty = 0
 
     def _cached(self, key: str):
         return self._cache.get(key)
@@ -80,10 +97,10 @@ class Geocoder:
                 place = resp.json()["places"][0]
                 coords = (float(place["latitude"]), float(place["longitude"]))
                 self._cache[key] = list(coords)
-                self._save()
+                self._mark_dirty()
                 return coords
             self._cache[key] = None
-            self._save()
+            self._mark_dirty()
         except (requests.RequestException, KeyError, ValueError, IndexError):
             log.debug("zip lookup failed for %s", zip_code)
         return None
@@ -110,10 +127,10 @@ class Geocoder:
                 hit = resp.json()[0]
                 coords = (float(hit["lat"]), float(hit["lon"]))
                 self._cache[key] = list(coords)
-                self._save()
+                self._mark_dirty()
                 return coords
             self._cache[key] = None
-            self._save()
+            self._mark_dirty()
         except (requests.RequestException, KeyError, ValueError, IndexError):
             log.debug("nominatim lookup failed for %s, %s", city, state)
         return None
