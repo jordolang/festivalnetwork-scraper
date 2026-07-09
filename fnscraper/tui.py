@@ -8,6 +8,7 @@ name.
 Keys:
     UP/DOWN, PgUp/PgDn, Home/End   scroll
     SPACE                           check/uncheck the show next to the cursor
+    d                               open the event-detail popup for the row
     ENTER or s                      save checked shows and exit
     q or ESC                        exit without saving
 """
@@ -15,12 +16,157 @@ Keys:
 from __future__ import annotations
 
 import curses
+import textwrap
 from datetime import date
+from typing import NamedTuple
 
 from .models import ScoredEvent
 
-HELP_LINE = "SPACE select   ENTER save+exit   q quit without saving   up/down scroll"
+HELP_LINE = (
+    "SPACE select   d details   ENTER save+exit   "
+    "q quit without saving   up/down scroll"
+)
 HEADER_FMT = "    {st:2}  {date:11}  {cpj:>9}  {cost:>9}  {drive:>6}  {name}"
+
+
+class DetailLine(NamedTuple):
+    """One rendered line of the detail popup.
+
+    ``bold`` marks section headers; ``indent`` is the left padding applied
+    to *continuation* lines when a long value gets word-wrapped, so wrapped
+    text stays aligned under its label.
+    """
+
+    text: str
+    bold: bool = False
+    indent: int = 0
+
+
+_LABEL_W = 14   # column width for "Label   value" field rows
+
+
+def _money(v: float | None) -> str:
+    if v is None or v == float("inf"):
+        return "n/a"
+    return f"${v:,.2f}"
+
+
+def _count(v: int | None, estimated: bool) -> str:
+    if v is None:
+        return "n/a"
+    return f"{v:,}" + ("  (est.)" if estimated else "")
+
+
+def _detail_lines(s: ScoredEvent) -> list[DetailLine]:
+    """Build the popup's content for one show, mirroring the layout of a
+    FestivalNet detail page: identity, when, where, the crowd, the money.
+
+    ─────────────────────────────────────────────────────────────────────
+    THIS is the function to make your own.  Everything below is a working
+    default, but *which* fields matter — and in what order — is a judgment
+    call only you can make as the vendor.  When you scan a listing on
+    festivalnet.com, what do your eyes jump to first?  Attendance?  Booth
+    fee?  Drive time?  Reorder the sections, drop fields you never read,
+    or promote the numbers you actually decide on.  The renderer wraps and
+    scrolls whatever you return, so you can't break the layout.
+    ─────────────────────────────────────────────────────────────────────
+    """
+    e, b = s.event, s.breakdown
+    out: list[DetailLine] = []
+
+    def head(text: str) -> None:
+        if out:
+            out.append(DetailLine(""))            # blank spacer above headers
+        out.append(DetailLine(text, bold=True))
+
+    def field(label: str, value: str) -> None:
+        out.append(DetailLine(f"{label + ':':<{_LABEL_W}}{value}", indent=_LABEL_W))
+
+    # Identity
+    out.append(DetailLine(e.name, bold=True))
+    if e.category_slug:
+        out.append(DetailLine(e.category_slug.replace("-", " ")))
+    if e.stale_listing:
+        out.append(DetailLine("⚠ listing looks stale — verify before applying"))
+
+    # When
+    head("WHEN")
+    when = f"{e.start_date:%a %b %d, %Y}" if e.start_date else "date TBD"
+    if e.end_date and e.end_date != e.start_date:
+        when += f"  →  {e.end_date:%a %b %d, %Y}"
+    if e.unconfirmed_date:
+        when += "  (unconfirmed)"
+    field("Dates", when)
+    if e.hours_text:
+        field("Hours", e.hours_text)
+
+    # Where
+    head("WHERE")
+    field("Location", ", ".join(p for p in (e.city, e.state) if p) or "TBD")
+    if e.venue:
+        field("Venue", e.venue)
+    if e.address:
+        field("Address", e.address)
+    if e.drive_hours is not None:
+        drive = f"{e.drive_hours:.1f} h one-way"
+        if e.distance_miles is not None:
+            drive += f"  ({e.distance_miles:.0f} mi)"
+        field("Drive", drive)
+
+    # The crowd
+    head("THE CROWD")
+    field("Admission", e.admission or "n/a")
+    att = e.attendance if e.attendance is not None else b.est_attendance
+    field("Attendance", _count(att, b.attendance_estimated or e.attendance is None))
+    exh = e.exhibitors if e.exhibitors is not None else b.est_exhibitors
+    field("Exhibitors", _count(exh, b.exhibitors_estimated or e.exhibitors is None))
+    field("Food booths", _count(e.food_booths, estimated=False))
+    if e.juried:
+        field("Juried", e.juried)
+    if e.deadlines:
+        field("Deadlines", e.deadlines)
+    if e.promoter:
+        field("Promoter", e.promoter)
+
+    # Fees (member-only on FestivalNet)
+    head("BOOTH FEES")
+    if e.exhib_fee is not None or e.food_fee is not None:
+        if e.exhib_fee is not None:
+            field("Exhibitor", _money(e.exhib_fee))
+        if e.food_fee is not None:
+            field("Food vendor", _money(e.food_fee))
+    else:
+        out.append(DetailLine("member login required — using estimate below"))
+
+    # The money — your profitability model
+    head("PROFITABILITY (estimated)")
+    field("Jars sold", f"{b.jars_sold:,.0f}")
+    field("Gross rev", _money(b.gross_revenue))
+    field("COGS", _money(b.cogs))
+    booth = _money(b.booth_fee) + ("  (est.)" if b.booth_fee_estimated else "")
+    field("Booth fee", booth)
+    field("Fuel", _money(b.fuel_cost))
+    field("Lodging", _money(b.lodging_cost))
+    field("Meals", _money(b.meals_cost))
+    field("Total cost", _money(b.total_cost))
+    field("Est. profit", _money(b.est_profit))
+    field("ROI", f"{b.roi:.2f}x per out-of-pocket $")
+    field("Cost / jar", _money(b.cost_per_jar))
+    field("Score", f"{b.score:.1f}")
+
+    if b.notes:
+        head("NOTES")
+        for note in b.notes:
+            out.append(DetailLine(f"- {note}", indent=2))
+
+    if e.description:
+        head("DESCRIPTION")
+        for para in e.description.splitlines():
+            out.append(DetailLine(para.strip()))
+
+    head("SOURCE")
+    field("URL", e.url)
+    return out
 
 
 def sort_for_picker(scored: list[ScoredEvent]) -> list[ScoredEvent]:
@@ -46,6 +192,88 @@ def format_row(s: ScoredEvent, checked: bool) -> str:
     cost = f"${b.total_cost:,.0f}"
     drive = f"{e.drive_hours or 0:.1f}h"
     return f"{mark} {e.state:2}  {when:11}  {cpj:>9}  {cost:>9}  {drive:>6}  {name}"
+
+
+def _wrap_detail(lines: list[DetailLine], width: int) -> list[DetailLine]:
+    """Word-wrap each logical line to ``width``, keeping bold/indent so a
+    wrapped value lines up under its label and headers stay headers."""
+    wrapped: list[DetailLine] = []
+    for ln in lines:
+        if not ln.text:
+            wrapped.append(ln)
+            continue
+        pieces = textwrap.wrap(
+            ln.text,
+            width=max(1, width),
+            subsequent_indent=" " * ln.indent,
+        ) or [""]
+        for piece in pieces:
+            wrapped.append(DetailLine(piece, bold=ln.bold, indent=ln.indent))
+    return wrapped
+
+
+def _draw_detail(stdscr, lines: list[DetailLine], top: int) -> None:
+    """Draw a centered, bordered popup showing ``lines`` scrolled to ``top``.
+
+    The main list underneath is left untouched, so the box reads as a modal
+    overlay — exactly like clicking a row on festivalnet.com.
+    """
+    height, width = stdscr.getmaxyx()
+    box_h = min(len(lines) + 2, height - 2)
+    box_w = min(80, width - 2)
+    box_y = (height - box_h) // 2
+    box_x = (width - box_w) // 2
+    inner_h = box_h - 2
+
+    win = curses.newwin(box_h, box_w, box_y, box_x)
+    win.erase()
+    win.box()
+
+    for i in range(inner_h):
+        idx = top + i
+        if idx >= len(lines):
+            break
+        ln = lines[idx]
+        attr = curses.A_BOLD if ln.bold else curses.A_NORMAL
+        win.addnstr(1 + i, 2, ln.text, box_w - 4, attr)
+
+    more_up = top > 0
+    more_down = top + inner_h < len(lines)
+    hint = "  up/down scroll   q/ESC/d close  "
+    if more_up or more_down:
+        arrows = f" {'^' if more_up else ' '}{'v' if more_down else ' '} "
+        hint = arrows + hint
+    win.addnstr(box_h - 1, 2, hint[: box_w - 4], box_w - 4, curses.A_DIM)
+    win.refresh()
+
+
+def _detail_modal(stdscr, s: ScoredEvent) -> None:
+    """Nested event loop: show one show's full detail until the user closes
+    it, then return control to the picker (which repaints over the box)."""
+    _, width = stdscr.getmaxyx()
+    lines = _wrap_detail(_detail_lines(s), min(80, width - 2) - 4)
+    top = 0
+    while True:
+        height, _ = stdscr.getmaxyx()
+        inner_h = max(1, min(len(lines) + 2, height - 2) - 2)
+        top = max(0, min(top, len(lines) - inner_h))
+        _draw_detail(stdscr, lines, top)
+
+        key = stdscr.getch()
+        if key in (curses.KEY_UP, ord("k")):
+            top = max(0, top - 1)
+        elif key in (curses.KEY_DOWN, ord("j")):
+            top = min(max(0, len(lines) - inner_h), top + 1)
+        elif key == curses.KEY_PPAGE:
+            top = max(0, top - inner_h)
+        elif key == curses.KEY_NPAGE:
+            top = min(max(0, len(lines) - inner_h), top + inner_h)
+        elif key == curses.KEY_HOME:
+            top = 0
+        elif key == curses.KEY_END:
+            top = max(0, len(lines) - inner_h)
+        elif key in (ord("q"), ord("d"), 27, curses.KEY_ENTER, 10, 13):
+            return
 
 
 def _draw(stdscr, rows: list[ScoredEvent], checked: set[str],
@@ -103,6 +331,8 @@ def _picker(stdscr, rows: list[ScoredEvent]) -> list[ScoredEvent] | None:
             eid = rows[cursor].event.event_id
             checked.symmetric_difference_update({eid})
             cursor = min(len(rows) - 1, cursor + 1)   # advance to next show
+        elif key == ord("d"):
+            _detail_modal(stdscr, rows[cursor])       # popup, then redraw list
         elif key in (curses.KEY_ENTER, 10, 13, ord("s")):
             return [s for s in rows if s.event.event_id in checked]
         elif key == ord("q"):
