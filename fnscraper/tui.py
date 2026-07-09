@@ -2,8 +2,10 @@
 
 A scrolling checkbox list, sorted by state, then date, then out-of-pocket
 cost.  Each row shows the estimated out-of-pocket **cost to sell one jar
-of salsa**, the total cost of doing the show, the location, date, and
-name.
+of salsa**, the **booth-space fee on its own**, the total cost of doing
+the show, the location, date, and name.  A ``~`` in front of the booth
+fee marks an estimate (no Pro login); a bare ``$`` is a real fee scraped
+from a logged-in session.
 
 Keys:
     UP/DOWN, PgUp/PgDn, Home/End   scroll
@@ -26,7 +28,7 @@ HELP_LINE = (
     "SPACE select   d details   ENTER save+exit   "
     "q quit without saving   up/down scroll"
 )
-HEADER_FMT = "    {st:2}  {date:11}  {cpj:>9}  {cost:>9}  {drive:>6}  {name}"
+HEADER_FMT = "    {st:2}  {date:11}  {cpj:>9}  {booth:>8}  {cost:>9}  {drive:>6}  {name}"
 
 
 class DetailLine(NamedTuple):
@@ -189,9 +191,16 @@ def format_row(s: ScoredEvent, checked: bool) -> str:
         when += f"-{e.end_date:%d}"
     mark = "[x]" if checked else "[ ]"
     name = f"{e.name} — {e.city}"
+    # Booth-space fee on its own; ~ marks an estimate (see module docstring).
+    booth = f"${b.booth_fee:,.0f}"
+    if b.booth_fee_estimated:
+        booth = "~" + booth
     cost = f"${b.total_cost:,.0f}"
     drive = f"{e.drive_hours or 0:.1f}h"
-    return f"{mark} {e.state:2}  {when:11}  {cpj:>9}  {cost:>9}  {drive:>6}  {name}"
+    return (
+        f"{mark} {e.state:2}  {when:11}  {cpj:>9}  {booth:>8}  "
+        f"{cost:>9}  {drive:>6}  {name}"
+    )
 
 
 def _wrap_detail(lines: list[DetailLine], width: int) -> list[DetailLine]:
@@ -285,7 +294,8 @@ def _draw(stdscr, rows: list[ScoredEvent], checked: set[str],
     title = f" FestivalNet picks — {len(rows)} shows, {len(checked)} selected "
     stdscr.addnstr(0, 0, title.ljust(width - 1), width - 1, curses.A_BOLD)
     header = HEADER_FMT.format(
-        st="ST", date="DATE", cpj="$/JAR", cost="SHOW $", drive="DRIVE", name="EVENT"
+        st="ST", date="DATE", cpj="$/JAR", booth="BOOTH $",
+        cost="SHOW $", drive="DRIVE", name="EVENT"
     )
     stdscr.addnstr(1, 0, header.ljust(width - 1), width - 1, curses.A_UNDERLINE)
 
@@ -354,7 +364,8 @@ def print_plain_list(scored: list[ScoredEvent]) -> None:
     """Non-interactive fallback: same list, same order, no curses."""
     rows = sort_for_picker(scored)
     print(HEADER_FMT.format(
-        st="ST", date="DATE", cpj="$/JAR", cost="SHOW $", drive="DRIVE", name="EVENT"
+        st="ST", date="DATE", cpj="$/JAR", booth="BOOTH $",
+        cost="SHOW $", drive="DRIVE", name="EVENT"
     ))
     for s in rows:
         print(format_row(s, checked=False))
