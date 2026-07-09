@@ -12,12 +12,17 @@ def _fmt_money(v: float) -> str:
     return f"${v:,.0f}"
 
 
+def _day(d: date, fmt: str) -> str:
+    """Format with an unpadded day of month (``%-d`` breaks on Windows)."""
+    return d.strftime(fmt).replace("{d}", str(d.day))
+
+
 def _date_range(s: ScoredEvent) -> str:
     ev = s.event
     if ev.start_date and ev.end_date and ev.end_date != ev.start_date:
-        return f"{ev.start_date:%a %b %-d} – {ev.end_date:%a %b %-d}"
+        return f"{_day(ev.start_date, '%a %b {d}')} – {_day(ev.end_date, '%a %b {d}')}"
     if ev.start_date:
-        return f"{ev.start_date:%a %b %-d}"
+        return _day(ev.start_date, "%a %b {d}")
     return "?"
 
 
@@ -42,7 +47,7 @@ def write_weekend_report(
         "",
     ]
     for saturday, group in weekends.items():
-        lines.append(f"## Weekend of {saturday:%B %-d, %Y}")
+        lines.append(f"## Weekend of {_day(saturday, '%B {d}, %Y')}")
         lines.append("")
         lines.append(
             "| # | Event | Dates | Where | Drive | Est. profit | "
@@ -82,9 +87,9 @@ def write_shortlist(selected: list[ScoredEvent], out_dir: Path) -> Path:
     lines = ["# Selected shows", ""]
     for s in selected:
         e, b = s.event, s.breakdown
-        when = f"{e.start_date:%a %b %-d, %Y}" if e.start_date else "?"
+        when = _day(e.start_date, "%a %b {d}, %Y") if e.start_date else "?"
         if e.end_date and e.end_date != e.start_date:
-            when += f" – {e.end_date:%a %b %-d}"
+            when += f" – {_day(e.end_date, '%a %b {d}')}"
         cpj = (f"${b.cost_per_jar:,.2f}"
                if b.cost_per_jar != float("inf") else "n/a")
         lines += [
@@ -108,7 +113,7 @@ def write_shortlist(selected: list[ScoredEvent], out_dir: Path) -> Path:
 
 def print_summary(weekends: dict[date, list[ScoredEvent]], top_n: int) -> None:
     for saturday, group in weekends.items():
-        print(f"\n=== Weekend of {saturday:%b %-d, %Y} ===")
+        print(f"\n=== Weekend of {_day(saturday, '%b {d}, %Y')} ===")
         for i, s in enumerate(group[:top_n], 1):
             e, b = s.event, s.breakdown
             print(
