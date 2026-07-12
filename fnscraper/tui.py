@@ -11,6 +11,7 @@ Keys:
     UP/DOWN, PgUp/PgDn, Home/End   scroll
     SPACE                           check/uncheck the show next to the cursor
     o                               toggle event-date/deadline ordering
+    m                               put missed deadlines first
     d                               open the event-detail popup for the row
     ENTER or s                      save checked shows and exit
     q or ESC                        exit without saving
@@ -27,7 +28,7 @@ from typing import NamedTuple
 from .models import ScoredEvent
 
 HELP_LINE = (
-    "SPACE select   o order: event/deadline   d details   ENTER save+exit   "
+    "SPACE select   o event/deadline   m missed first   d details   ENTER save+exit   "
     "q quit without saving   up/down scroll"
 )
 HEADER_FMT = "    {st:2}  {deadline:11}  {date:11}  {cpj:>9}  {booth:>8}  {cost:>9}  {drive:>6}  {name}"
@@ -181,9 +182,8 @@ _DEADLINE_PATTERNS = (
 )
 
 
-def deadline_date(text: str, today: date | None = None) -> date | None:
-    """Return the earliest upcoming date found in deadline text."""
-    today = today or date.today()
+def _parsed_deadlines(text: str, today: date) -> list[date]:
+    """Return all recognizable deadline dates, including missed ones."""
     found: list[date] = []
     for pattern in _DEADLINE_PATTERNS:
         for raw in re.findall(pattern, text, flags=re.I):
@@ -199,6 +199,13 @@ def deadline_date(text: str, today: date | None = None) -> date | None:
                     break
                 except ValueError:
                     continue
+    return found
+
+
+def deadline_date(text: str, today: date | None = None) -> date | None:
+    """Return the earliest upcoming date found in deadline text."""
+    today = today or date.today()
+    found = _parsed_deadlines(text, today)
     upcoming = [d for d in found if d >= today]
     return min(upcoming) if upcoming else None
 
@@ -223,6 +230,15 @@ def sort_for_picker(scored: list[ScoredEvent], order: str = "event") -> list[Sco
             s.event.state or "~",
             s.breakdown.total_cost,
         ))
+    if order == "missed":
+        today = date.today()
+        return sorted(scored, key=lambda s: (
+            0 if any(d < today for d in _parsed_deadlines(s.event.deadlines, today)) else 1,
+            min(_parsed_deadlines(s.event.deadlines, today), default=date.max),
+            s.event.start_date or date.max,
+            s.event.state or "~",
+            s.breakdown.total_cost,
+        ))
     return sorted(
         scored,
         key=lambda s: (
@@ -240,7 +256,9 @@ def format_row(s: ScoredEvent, checked: bool) -> str:
     if e.end_date and e.end_date != e.start_date:
         when += f"-{e.end_date:%d}"
     mark = "[x]" if checked else "[ ]"
-    deadline = deadline_date(e.deadlines)
+    today = date.today()
+    parsed = _parsed_deadlines(e.deadlines, today)
+    deadline = deadline_date(e.deadlines, today) or min(parsed, default=None)
     deadline_text = f"{deadline:%b %d}" if deadline else "?"
     name = f"{e.name} — {e.city}"
     # Booth-space fee on its own; ~ marks an estimate (see module docstring).
@@ -399,6 +417,12 @@ def _picker(stdscr, rows: list[ScoredEvent]) -> list[ScoredEvent] | None:
         elif key == ord("o"):
             current_id = rows[cursor].event.event_id
             order = "deadline" if order == "event" else "event"
+            rows[:] = sort_for_picker(rows, order)
+            cursor = next(i for i, s in enumerate(rows) if s.event.event_id == current_id)
+            top = cursor
+        elif key == ord("m"):
+            current_id = rows[cursor].event.event_id
+            order = "event" if order == "missed" else "missed"
             rows[:] = sort_for_picker(rows, order)
             cursor = next(i for i, s in enumerate(rows) if s.event.event_id == current_id)
             top = cursor
