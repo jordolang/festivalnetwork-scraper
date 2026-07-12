@@ -10,6 +10,7 @@ from a logged-in session.
 Keys:
     UP/DOWN, PgUp/PgDn, Home/End   scroll
     SPACE                           check/uncheck the show next to the cursor
+    o                               toggle event-date/deadline ordering
     d                               open the event-detail popup for the row
     ENTER or s                      save checked shows and exit
     q or ESC                        exit without saving
@@ -18,17 +19,18 @@ Keys:
 from __future__ import annotations
 
 import curses
+import re
 import textwrap
-from datetime import date
+from datetime import date, datetime
 from typing import NamedTuple
 
 from .models import ScoredEvent
 
 HELP_LINE = (
-    "SPACE select   d details   ENTER save+exit   "
+    "SPACE select   o order: event/deadline   d details   ENTER save+exit   "
     "q quit without saving   up/down scroll"
 )
-HEADER_FMT = "    {st:2}  {date:11}  {cpj:>9}  {booth:>8}  {cost:>9}  {drive:>6}  {name}"
+HEADER_FMT = "    {st:2}  {deadline:11}  {date:11}  {cpj:>9}  {booth:>8}  {cost:>9}  {drive:>6}  {name}"
 
 
 class DetailLine(NamedTuple):
@@ -171,8 +173,56 @@ def _detail_lines(s: ScoredEvent) -> list[DetailLine]:
     return out
 
 
-def sort_for_picker(scored: list[ScoredEvent]) -> list[ScoredEvent]:
+_DEADLINE_PATTERNS = (
+    r"\b\d{1,2}/\d{1,2}/\d{2,4}\b",
+    r"\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|"
+    r"Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|"
+    r"Dec(?:ember)?)\s+\d{1,2}(?:,\s*\d{4})?\b",
+)
+
+
+def deadline_date(text: str, today: date | None = None) -> date | None:
+    """Return the earliest upcoming date found in deadline text."""
+    today = today or date.today()
+    found: list[date] = []
+    for pattern in _DEADLINE_PATTERNS:
+        for raw in re.findall(pattern, text, flags=re.I):
+            for fmt in ("%m/%d/%Y", "%m/%d/%y", "%B %d, %Y", "%b %d, %Y",
+                        "%B %d", "%b %d"):
+                try:
+                    parsed = datetime.strptime(raw, fmt).date()
+                    if "%Y" not in fmt and "%y" not in fmt:
+                        parsed = parsed.replace(year=today.year)
+                        if parsed < today:
+                            parsed = parsed.replace(year=today.year + 1)
+                    found.append(parsed)
+                    break
+                except ValueError:
+                    continue
+    upcoming = [d for d in found if d >= today]
+    return min(upcoming) if upcoming else None
+
+
+def filter_by_deadline(scored: list[ScoredEvent], deadline_by: date,
+                       today: date | None = None) -> list[ScoredEvent]:
+    """Keep events with a known, open application deadline by ``deadline_by``."""
+    today = today or date.today()
+    return [
+        s for s in scored
+        if (deadline := deadline_date(s.event.deadlines, today)) is not None
+        and deadline <= deadline_by
+    ]
+
+
+def sort_for_picker(scored: list[ScoredEvent], order: str = "event") -> list[ScoredEvent]:
     """State, then date, then out-of-pocket cost — the requested order."""
+    if order == "deadline":
+        return sorted(scored, key=lambda s: (
+            deadline_date(s.event.deadlines) or date.max,
+            s.event.start_date or date.max,
+            s.event.state or "~",
+            s.breakdown.total_cost,
+        ))
     return sorted(
         scored,
         key=lambda s: (
@@ -190,6 +240,8 @@ def format_row(s: ScoredEvent, checked: bool) -> str:
     if e.end_date and e.end_date != e.start_date:
         when += f"-{e.end_date:%d}"
     mark = "[x]" if checked else "[ ]"
+    deadline = deadline_date(e.deadlines)
+    deadline_text = f"{deadline:%b %d}" if deadline else "?"
     name = f"{e.name} — {e.city}"
     # Booth-space fee on its own; ~ marks an estimate (see module docstring).
     booth = f"${b.booth_fee:,.0f}"
@@ -198,7 +250,7 @@ def format_row(s: ScoredEvent, checked: bool) -> str:
     cost = f"${b.total_cost:,.0f}"
     drive = f"{e.drive_hours or 0:.1f}h"
     return (
-        f"{mark} {e.state:2}  {when:11}  {cpj:>9}  {booth:>8}  "
+        f"{mark} {e.state:2}  {deadline_text:11}  {when:11}  {cpj:>9}  {booth:>8}  "
         f"{cost:>9}  {drive:>6}  {name}"
     )
 
@@ -286,15 +338,15 @@ def _detail_modal(stdscr, s: ScoredEvent) -> None:
 
 
 def _draw(stdscr, rows: list[ScoredEvent], checked: set[str],
-          cursor: int, top: int) -> None:
+          cursor: int, top: int, order: str) -> None:
     stdscr.erase()
     height, width = stdscr.getmaxyx()
     body_h = height - 3
 
-    title = f" FestivalNet picks — {len(rows)} shows, {len(checked)} selected "
+    title = f" FestivalNet picks — {len(rows)} shows, {len(checked)} selected — order: {order} "
     stdscr.addnstr(0, 0, title.ljust(width - 1), width - 1, curses.A_BOLD)
     header = HEADER_FMT.format(
-        st="ST", date="DATE", cpj="$/JAR", booth="BOOTH $",
+        st="ST", deadline="DEADLINE", date="DATE", cpj="$/JAR", booth="BOOTH $",
         cost="SHOW $", drive="DRIVE", name="EVENT"
     )
     stdscr.addnstr(1, 0, header.ljust(width - 1), width - 1, curses.A_UNDERLINE)
@@ -314,6 +366,7 @@ def _picker(stdscr, rows: list[ScoredEvent]) -> list[ScoredEvent] | None:
     stdscr.keypad(True)
     checked: set[str] = set()
     cursor = top = 0
+    order = "event"
 
     while True:
         height, _ = stdscr.getmaxyx()
@@ -322,7 +375,7 @@ def _picker(stdscr, rows: list[ScoredEvent]) -> list[ScoredEvent] | None:
             top = cursor
         elif cursor >= top + body_h:
             top = cursor - body_h + 1
-        _draw(stdscr, rows, checked, cursor, top)
+        _draw(stdscr, rows, checked, cursor, top, order)
 
         key = stdscr.getch()
         if key in (curses.KEY_UP, ord("k")):
@@ -343,6 +396,12 @@ def _picker(stdscr, rows: list[ScoredEvent]) -> list[ScoredEvent] | None:
             cursor = min(len(rows) - 1, cursor + 1)   # advance to next show
         elif key == ord("d"):
             _detail_modal(stdscr, rows[cursor])       # popup, then redraw list
+        elif key == ord("o"):
+            current_id = rows[cursor].event.event_id
+            order = "deadline" if order == "event" else "event"
+            rows[:] = sort_for_picker(rows, order)
+            cursor = next(i for i, s in enumerate(rows) if s.event.event_id == current_id)
+            top = cursor
         elif key in (curses.KEY_ENTER, 10, 13, ord("s")):
             return [s for s in rows if s.event.event_id in checked]
         elif key == ord("q"):
@@ -364,7 +423,7 @@ def print_plain_list(scored: list[ScoredEvent]) -> None:
     """Non-interactive fallback: same list, same order, no curses."""
     rows = sort_for_picker(scored)
     print(HEADER_FMT.format(
-        st="ST", date="DATE", cpj="$/JAR", booth="BOOTH $",
+        st="ST", deadline="DEADLINE", date="DATE", cpj="$/JAR", booth="BOOTH $",
         cost="SHOW $", drive="DRIVE", name="EVENT"
     ))
     for s in rows:

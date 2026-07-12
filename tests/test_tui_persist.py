@@ -2,7 +2,7 @@ from datetime import date
 
 from fnscraper import persist
 from fnscraper.scoring import score_event
-from fnscraper.tui import format_row, sort_for_picker
+from fnscraper.tui import deadline_date, filter_by_deadline, format_row, sort_for_picker
 from tests.test_scoring import make_event
 
 
@@ -47,6 +47,35 @@ def test_format_row_shows_booth_fee_on_its_own():
     # ~ prefix marks an estimated fee (no Pro login in the test fixture).
     assert b.booth_fee_estimated
     assert f"~${b.booth_fee:,.0f}" in line
+
+
+def test_deadline_column_and_deadline_order(monkeypatch):
+    monkeypatch.setattr("fnscraper.tui.date", type("FixedDate", (date,), {
+        "today": classmethod(lambda cls: cls(2026, 7, 11))
+    }))
+    late = scored(event_id="late", start_date=date(2026, 7, 1),
+                  deadlines="Art & Craft: August 15, 2026")
+    soon = scored(event_id="soon", start_date=date(2026, 10, 1),
+                  deadlines="Apply by 07/20/2026")
+    unknown = scored(event_id="unknown", deadlines="until full")
+    rows = sort_for_picker([late, unknown, soon], order="deadline")
+    assert [r.event.event_id for r in rows] == ["soon", "late", "unknown"]
+    assert deadline_date(soon.event.deadlines, today=date(2026, 7, 11)) == date(2026, 7, 20)
+    assert "Jul 20" in format_row(soon, checked=False)
+
+
+def test_filter_by_open_deadline():
+    expired = scored(event_id="expired", deadlines="Apply by 07/01/2026")
+    included = scored(event_id="included", deadlines="Apply by July 20, 2026")
+    too_late = scored(event_id="too-late", deadlines="Apply by August 15, 2026")
+    unknown = scored(event_id="unknown", deadlines="until full")
+
+    rows = filter_by_deadline(
+        [expired, included, too_late, unknown],
+        deadline_by=date(2026, 7, 31),
+        today=date(2026, 7, 11),
+    )
+    assert [r.event.event_id for r in rows] == ["included"]
 
 
 def test_format_row_marks_real_booth_fee_without_tilde():

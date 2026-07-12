@@ -60,6 +60,7 @@ python -m fnscraper --max-drive-hours 6         # tighter radius
 python -m fnscraper --refresh                   # ignore the page cache
 python -m fnscraper --no-pick                   # skip the picker, print the list
 python -m fnscraper --browse                    # reopen picker on last results
+python -m fnscraper --deadline-by 2026-08-01    # applications due by this date
 ```
 
 ## The algorithm

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+from datetime import date
 from pathlib import Path
 
 from . import apps, config, export, importer, pdf_fill, persist, pipeline, report, tui
@@ -40,6 +41,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--browse", action="store_true",
                    help="Reopen the picker on the last scrape's results "
                         "without hitting the network")
+    p.add_argument("--deadline-by", type=date.fromisoformat, metavar="YYYY-MM-DD",
+                   help="Only show events with an open application deadline "
+                        "on or before this date")
     p.add_argument("--max-pages-per-state", type=int,
                    default=config.MAX_PAGES_PER_STATE, help=argparse.SUPPRESS)
     p.add_argument("-v", "--verbose", action="store_true")
@@ -158,6 +162,15 @@ def main(argv: list[str] | None = None) -> int:
             print("No qualifying events found. Try --weeks or --refresh.")
             return 1
         persist.save_results(scored, results_path)
+
+    if args.deadline_by:
+        scored = tui.filter_by_deadline(scored, args.deadline_by)
+        if not scored:
+            print(f"No events have an open application deadline on or before "
+                  f"{args.deadline_by}.")
+            return 0
+
+    if not args.browse:
         weekends = pipeline.group_by_weekend(scored)
         export.export_csv(scored, out_dir / "all_events.csv")
         report.write_weekend_report(
