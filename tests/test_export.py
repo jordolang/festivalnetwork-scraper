@@ -29,7 +29,7 @@ def test_export_all_writes_three_formats(tmp_path):
     names = {p.name for p in written}
     assert names == {"selected_shows.csv", "selected_shows.md", "selected_shows.xlsx"}
 
-    with (tmp_path / "selected_shows.csv").open() as fh:
+    with (tmp_path / "selected_shows.csv").open(encoding="utf-8-sig") as fh:
         rows = list(csv.reader(fh))
     assert rows[0] == export._columns()
     assert len(rows) == 3

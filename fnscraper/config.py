@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from pathlib import Path
 
 BASE_URL = "https://festivalnet.com"
 
@@ -139,11 +140,44 @@ REQUEST_TIMEOUT = 30
 MAX_PAGES_PER_STATE = 40      # safety valve
 CACHE_TTL_HOURS = 20          # re-use fetched pages within a day
 
+# How many FestivalNet pages to fetch in parallel.  The throttle keeps the
+# *aggregate* request rate polite (delay / jobs seconds between requests),
+# so more jobs = faster crawl at a proportionally higher steady rate.
+# 1 restores the old strictly-sequential, one-request-per-1.5s behaviour.
+DEFAULT_JOBS = 4
+
 # Optional FestivalNet Pro credentials.  When set, the scraper logs in and
 # real Exhib./Food fees replace the tier estimates wherever the site
 # exposes them.
 ENV_USERNAME = "FESTIVALNET_USER"
 ENV_PASSWORD = "FESTIVALNET_PASS"
+
+
+def load_dotenv(path: str | os.PathLike | None = None) -> None:
+    """Populate os.environ from a .env file if present.
+
+    Minimal, dependency-free KEY=VALUE parser so credentials placed in a
+    (gitignored) .env are picked up on every run without the user having to
+    `export` them each session.  Existing environment variables win, so a
+    real shell export always overrides the file.
+    """
+    if path is None:
+        # Project root is one directory up from this package.
+        path = Path(__file__).resolve().parent.parent / ".env"
+    path = Path(path)
+    if not path.is_file():
+        return
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        if line.lower().startswith("export "):
+            line = line[len("export "):].lstrip()
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
 
 
 @dataclass
@@ -159,11 +193,13 @@ class Settings:
     geocode_cache: str = "data/geocode_cache.json"
     refresh: bool = False              # ignore HTTP cache
     max_pages_per_state: int = MAX_PAGES_PER_STATE
+    jobs: int = DEFAULT_JOBS           # parallel FestivalNet fetches
     username: str | None = None
     password: str | None = None
 
     @classmethod
     def from_env(cls, **overrides) -> "Settings":
+        load_dotenv()
         s = cls(**overrides)
         s.username = s.username or os.environ.get(ENV_USERNAME)
         s.password = s.password or os.environ.get(ENV_PASSWORD)

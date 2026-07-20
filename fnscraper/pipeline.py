@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
 
 from . import config, parse
@@ -47,17 +48,30 @@ def run(settings: config.Settings) -> list[ScoredEvent]:
     today = date.today()
     horizon = today + timedelta(weeks=settings.weeks_ahead)
 
-    fetcher = Fetcher(cache_dir=settings.cache_dir, refresh=settings.refresh)
+    jobs = max(1, settings.jobs)
+    fetcher = Fetcher(
+        cache_dir=settings.cache_dir, refresh=settings.refresh, workers=jobs
+    )
     if settings.username and settings.password:
         fetcher.login(settings.username, settings.password)
 
     geocoder = Geocoder(settings.geocode_cache)
 
-    # 1. Crawl listings for every candidate state.
+    # 1. Crawl listings for every candidate state.  Each state walks its own
+    #    pages sequentially, but different states are independent, so we run
+    #    up to `jobs` of them at once.  First-writer-wins de-dup below keeps
+    #    the result order-independent.
     seen: dict[str, Event] = {}
-    for state in settings.states:
-        for ev in crawl_state(fetcher, state, horizon, settings.max_pages_per_state):
-            seen.setdefault(ev.event_id, ev)
+    with ThreadPoolExecutor(max_workers=jobs) as pool:
+        per_state = pool.map(
+            lambda st: crawl_state(
+                fetcher, st, horizon, settings.max_pages_per_state
+            ),
+            settings.states,
+        )
+        for events in per_state:
+            for ev in events:
+                seen.setdefault(ev.event_id, ev)
 
     # 2. Keep events inside the date window.
     upcoming = [
@@ -100,23 +114,37 @@ def run(settings: config.Settings) -> list[ScoredEvent]:
     log.info("%d events within ~%.0f h drive of %s",
              len(in_range), settings.max_drive_hours, config.HOME_NAME)
 
-    # 4. Fetch detail pages for the survivors (attendance, exhibitors,
-    #    admission, street address — and real fees when logged in).
-    for i, ev in enumerate(in_range, 1):
-        try:
-            html = fetcher.get(ev.url)
-            parse.parse_detail_page(html, ev)
-        except Exception as exc:
-            log.warning("Detail fetch failed for %s: %s", ev.url, exc)
-            continue
+    # 4a. Fetch + parse detail pages for the survivors (attendance,
+    #     exhibitors, admission, street address — and real fees when logged
+    #     in).  Fetching is the bulk of the run and every event is
+    #     independent, so we fan out across `jobs` workers.  parse_detail_page
+    #     only mutates its own event, so the threads never touch shared state.
+    def _enrich(ev: Event) -> None:
+        html = fetcher.get(ev.url)
+        parse.parse_detail_page(html, ev)
+
+    done = 0
+    with ThreadPoolExecutor(max_workers=jobs) as pool:
+        futures = {pool.submit(_enrich, ev): ev for ev in in_range}
+        for fut in futures:
+            ev = futures[fut]
+            try:
+                fut.result()
+            except Exception as exc:
+                log.warning("Detail fetch failed for %s: %s", ev.url, exc)
+            done += 1
+            if done % 25 == 0:
+                log.info("detail pages: %d/%d", done, len(in_range))
+
+    # 4b. Re-locate events that exposed a street address, using its ZIP for a
+    #     tighter drive estimate.  Kept sequential: Nominatim/zippopotam.us
+    #     enforce ~1 req/s and the Geocoder cache/state is not thread-safe.
+    for ev in in_range:
         if ev.address:
-            # Re-locate with the street address ZIP for a tighter estimate.
             lat, lon, approx = geocoder.locate(ev.city, ev.state, ev.address)
             if not approx:
                 ev.lat, ev.lon = lat, lon
                 ev.distance_miles, ev.drive_hours = drive_estimate(lat, lon)
-        if i % 25 == 0:
-            log.info("detail pages: %d/%d", i, len(in_range))
 
     # 5. Final hard distance filter, then score.
     scored = [

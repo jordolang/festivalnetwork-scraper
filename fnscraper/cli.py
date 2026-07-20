@@ -40,7 +40,12 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Skip the picker; print the list and write reports")
     p.add_argument("--browse", action="store_true",
                    help="Reopen the picker on the last scrape's results "
-                        "without hitting the network")
+                        "instantly, without hitting the network")
+    p.add_argument("--jobs", "-j", type=int, default=config.DEFAULT_JOBS,
+                   metavar="N",
+                   help=f"Parallel page fetches (default: {config.DEFAULT_JOBS}). "
+                        "Higher is faster but hits FestivalNet harder; "
+                        "use 1 for the slowest, most polite crawl.")
     p.add_argument("--deadline-by", type=date.fromisoformat, metavar="YYYY-MM-DD",
                    help="Only show events with an open application deadline "
                         "on or before this date")
@@ -144,6 +149,7 @@ def main(argv: list[str] | None = None) -> int:
         output_dir=args.output,
         refresh=args.refresh,
         max_pages_per_state=args.max_pages_per_state,
+        jobs=args.jobs,
     )
     if args.states:
         settings.states = args.states

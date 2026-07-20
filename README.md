@@ -57,11 +57,29 @@ Useful flags:
 python -m fnscraper --weeks 12 --top 8          # longer horizon, more picks
 python -m fnscraper --states Ohio Pennsylvania  # limit the crawl
 python -m fnscraper --max-drive-hours 6         # tighter radius
+python -m fnscraper --jobs 8                     # fetch faster (more parallel requests)
+python -m fnscraper --jobs 1                     # slowest, most polite crawl
 python -m fnscraper --refresh                   # ignore the page cache
 python -m fnscraper --no-pick                   # skip the picker, print the list
-python -m fnscraper --browse                    # reopen picker on last results
+python -m fnscraper --browse                    # instant: reopen last results, no network
 python -m fnscraper --deadline-by 2026-08-01    # applications due by this date
 ```
+
+### Loading results quickly
+
+Two things make repeat use fast:
+
+- **`--browse`** replays the *last* scrape's results from `reports/results.json`
+  instantly, with zero network calls. Use it whenever you just want to re-open
+  the picker or re-export — no reason to re-crawl.
+- **`--jobs N`** controls how many FestivalNet pages are fetched in parallel on a
+  fresh scrape (default `4`). The crawl's aggregate request rate stays polite
+  (`~N / 1.5` requests/sec), so a higher `N` finishes a cold run proportionally
+  faster; `--jobs 1` restores the original strictly-sequential crawl. Geocoding
+  stays sequential regardless, to respect the OpenStreetMap ~1 req/sec policy.
+
+Pages are also cached on disk for ~20 hours, so even without `--browse` a second
+run within the day mostly reuses the cache and skips the network entirely.
 
 ## The algorithm
 
