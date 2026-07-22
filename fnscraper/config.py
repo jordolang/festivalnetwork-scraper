@@ -68,15 +68,126 @@ MAX_DAYTRIP_HOURS = 2.5
 # ---------------------------------------------------------------------------
 # Revenue model for a salsa vendor
 # ---------------------------------------------------------------------------
-AVG_SALE = 10.0            # average transaction (jar or two of salsa)
-JAR_PRICE = 8.0            # retail price of a single jar
-UNIT_COST_RATIO = 0.35     # cost of goods sold as fraction of revenue
+JAR_PRICE = 10.0           # a single jar, bought on its own
 
-# Fraction of attendees who buy from a given food-product booth at a
-# small event.  Capture falls as events get bigger (more to see, more
-# competing vendors), so effective buyers = CAPTURE_RATE * attendance**CAPTURE_EXPONENT.
-CAPTURE_RATE = 0.045
-CAPTURE_EXPONENT = 0.88
+# The deals actually offered at the booth: (jars, price).  These matter
+# because customers buy *packages*, not jars — the $25 average order is the
+# 3-for-$25 deal, so it moves three jars, not "$25 worth" of them.  Dividing
+# revenue by the single-jar price would undercount every package sold and so
+# undercount the salsa consumed to earn it.
+PRICE_LADDER = [
+    (1, 10.0),
+    (3, 25.0),
+    (4, 32.0),
+    (5, 40.0),             # 5 jars + a bag of chips
+    (12, 80.0),            # a full case
+]
+
+# Tortilla chips.  At $3.00 over a $1.00 bag these carry a 67% margin —
+# better than any salsa deal on the ladder, the best-earning thing at the
+# booth per dollar of stock.  Worth remembering that the 5-jar deal hands
+# a bag over for nothing: it costs $1.00 and forgoes $3.00 of chip sales.
+CHIPS_PRICE = 3.00
+CHIPS_COST = 1.00
+
+# Non-salsa goods bundled into a deal, keyed by the deal's jar count.
+BUNDLE_EXTRA_COST = {5: CHIPS_COST}
+
+# Share of orders that also take a bag of chips at the counter, over and
+# above anything the deal already includes.  1 in 8, from the vendor's own
+# read of the booth — a working estimate, not till data, so treat the chip
+# line as the softest number in the model.  Each point of attach rate is
+# worth $2.00 of margin per hundred orders.
+CHIPS_ATTACH_RATE = 0.125      # 1 in 8
+
+# How the day's orders split across the ladder.  Until there is real till
+# data, the honest default is the stated average: every order is the
+# 3-for-$25 deal.  Weights are normalised, so a richer mix drawn from real
+# receipts can simply be dropped in, e.g.
+#     ORDER_MIX = {1: 0.30, 3: 0.45, 4: 0.10, 5: 0.10, 12: 0.05}
+ORDER_MIX = {3: 1.0}
+
+
+def _ladder_price(jars: int) -> float:
+    for count, price in PRICE_LADDER:
+        if count == jars:
+            return price
+    raise KeyError(f"no deal on the price ladder sells {jars} jars")
+
+
+def _mix() -> list[tuple[int, float, float]]:
+    """(jars, price, share) for each deal, shares normalised to 1."""
+    total = sum(ORDER_MIX.values())
+    if total <= 0:
+        raise ValueError("ORDER_MIX must have at least one positive weight")
+    return [
+        (jars, _ladder_price(jars), weight / total)
+        for jars, weight in ORDER_MIX.items()
+    ]
+
+
+def avg_sale() -> float:
+    """Average dollars per transaction, derived from the deal mix."""
+    deals = sum(price * share for _, price, share in _mix())
+    return deals + CHIPS_ATTACH_RATE * CHIPS_PRICE
+
+
+def jars_per_order() -> float:
+    """Average jars per transaction, derived from the deal mix."""
+    return sum(jars * share for jars, _, share in _mix())
+
+
+def cogs_per_order() -> float:
+    """Cost of goods behind one average order, bundled extras included."""
+    deals = sum(
+        (jars * jar_cost() + BUNDLE_EXTRA_COST.get(jars, 0.0)) * share
+        for jars, _, share in _mix()
+    )
+    return deals + CHIPS_ATTACH_RATE * CHIPS_COST
+
+
+# Kept as a module constant for readability in reports.  Derived, not typed
+# in, so it can never drift out of step with the ladder above.
+AVG_SALE = avg_sale()
+
+# Cost of goods, per jar.  A batch runs about $1,500 of ingredients plus
+# about $1,000 of jars and lids, and the true unit cost is known to fall
+# between $2.50 and $3.50.  The model uses the top of that band: when the
+# question is "does this show pay?", overstating cost is the safe direction.
+#
+# This is deliberately a cost *per jar* and not a percentage of revenue.
+# COGS does not move when the shelf price moves — raising JAR_PRICE to $12
+# would, under a percentage, silently invent 20% more ingredient cost.
+JAR_COST = 3.50
+JAR_COST_RANGE = (2.50, 3.50)      # for sensitivity checks
+
+# Batch economics, for deriving JAR_COST once the yield is known.  Set
+# BATCH_JARS to the jars a single batch actually fills and jar_cost() uses
+# it instead of the flat figure above.  ($2,500 / 715 jars = $3.50;
+# $2,500 / 1,000 jars = $2.50 — so the yield is somewhere in that range.)
+BATCH_INGREDIENT_COST = 1_500.0
+BATCH_PACKAGING_COST = 1_000.0     # jars and lids
+BATCH_JARS: int | None = None      # None -> use JAR_COST
+
+
+def jar_cost() -> float:
+    """Cost to produce one jar, derived from batch yield when it is known."""
+    if BATCH_JARS:
+        return (BATCH_INGREDIENT_COST + BATCH_PACKAGING_COST) / BATCH_JARS
+    return JAR_COST
+
+# Fraction of attendees who buy from the booth.  The house rule is
+# "roughly 1 sale per 40 visitors, or better", so the baseline capture is
+# 1/40 = 0.025 and scales linearly with attendance (exponent 1.0).
+# Demand multipliers (category fit, competition, admission, data quality)
+# move the real number up or down from there.
+CAPTURE_RATE = 0.025               # 1 buyer per 40 attendees
+CAPTURE_EXPONENT = 1.0             # linear in attendance
+
+# "or better": after the multipliers are applied, never model a worse
+# conversion than 1-in-40 of the gate.  Set to None to let a bad category
+# fit / crowded field drag the estimate below the floor.
+MIN_CAPTURE_RATE = 0.025
 
 # One booth can only ring up so many sales in a day, no matter how big
 # the crowd — this caps mega-event projections at physical reality.
@@ -127,6 +238,26 @@ DEFAULT_EXHIBITORS = 40
 # Penalty multipliers for data-quality flags.
 UNCONFIRMED_DATE_PENALTY = 0.85
 STALE_LISTING_PENALTY = 0.90
+
+# ---------------------------------------------------------------------------
+# "Best weekends" booking plan (fnscraper best)
+# ---------------------------------------------------------------------------
+# A show only earns a slot if it actually runs on a weekend day.  Mon/Tue
+# are dead for a retail booth, so a show that runs *only* Mon-Tue is cut.
+# Weekday numbers are Python's: Mon=0 .. Sun=6.
+BOOKABLE_WEEKDAYS = {2, 3, 4, 5, 6}          # Wed-Sun
+PRIME_WEEKDAYS = {4, 5, 6}                   # Fri/Sat/Sun — the money days
+
+# Multiplier applied to the ranking score for how much of the show lands on
+# prime days.  A Fri-Sun show keeps its full score; a Wed-Thu-only show is
+# ranked as if it were worth ~30% less, so it only wins a slot when nothing
+# better is available that weekend.
+PRIME_WEEKEND_BONUS = 1.00
+OFF_WEEKEND_PENALTY = 0.70
+
+BEST_MONTHS_AHEAD = 3          # planning horizon
+BEST_TOP_PER_WEEKEND = 5       # shows per weekend in the plan
+BEST_EXPORT_DIR = "reports/josemadridsalsa"
 
 # ---------------------------------------------------------------------------
 # Crawling behavior

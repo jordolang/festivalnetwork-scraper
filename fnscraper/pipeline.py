@@ -140,8 +140,12 @@ def run(settings: config.Settings) -> list[ScoredEvent]:
     #     tighter drive estimate.  Kept sequential: Nominatim/zippopotam.us
     #     enforce ~1 req/s and the Geocoder cache/state is not thread-safe.
     for ev in in_range:
-        if ev.address:
-            lat, lon, approx = geocoder.locate(ev.city, ev.state, ev.address)
+        # Anonymous listings put the whole mailing line in `address`; Pro
+        # pages give the street alone and the ZIP up in the header block.
+        # Join them so both layouts get the tighter ZIP-based fix.
+        locator = " ".join(x for x in (ev.address, ev.zip_code) if x)
+        if locator:
+            lat, lon, approx = geocoder.locate(ev.city, ev.state, locator)
             if not approx:
                 ev.lat, ev.lon = lat, lon
                 ev.distance_miles, ev.drive_hours = drive_estimate(lat, lon)

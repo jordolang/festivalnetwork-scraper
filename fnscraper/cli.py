@@ -8,7 +8,10 @@ import sys
 from datetime import date
 from pathlib import Path
 
-from . import apps, config, export, importer, pdf_fill, persist, pipeline, report, tui
+from . import (
+    apps, best, config, export, importer, pdf_fill, persist, pipeline, report,
+    scoring, tui,
+)
 from .http import Fetcher
 
 
@@ -81,6 +84,116 @@ def build_apply_parser() -> argparse.ArgumentParser:
     return p
 
 
+def build_best_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        prog="fnscraper best",
+        description=(
+            "One-button booking plan: the most profitable bookable shows "
+            "for every weekend over the next few months, exported as a CSV "
+            "the Jose Madrid Salsa admin panel can import."
+        ),
+    )
+    p.add_argument("--months", type=int, default=config.BEST_MONTHS_AHEAD,
+                   help=f"Months ahead to plan (default: {config.BEST_MONTHS_AHEAD})")
+    p.add_argument("--top", type=int, default=config.BEST_TOP_PER_WEEKEND,
+                   help=f"Shows per weekend (default: {config.BEST_TOP_PER_WEEKEND})")
+    p.add_argument("--max-repeats", type=int, default=2,
+                   help="Weekends one recurring show may occupy (default: 2)")
+    p.add_argument("--out", default=config.BEST_EXPORT_DIR,
+                   help=f"Export root (default: {config.BEST_EXPORT_DIR})")
+    p.add_argument("--max-drive-hours", type=float, default=config.MAX_DRIVE_HOURS,
+                   help="One-way drive-time limit (default: 10)")
+    p.add_argument("--states", nargs="*", default=None, metavar="STATE")
+    p.add_argument("--cached", action="store_true",
+                   help="Plan from the last scrape's saved results instead of "
+                        "hitting the network")
+    p.add_argument("--refresh", action="store_true",
+                   help="Ignore the HTTP cache and re-fetch everything")
+    p.add_argument("--jobs", "-j", type=int, default=config.DEFAULT_JOBS, metavar="N")
+    p.add_argument("--json", action="store_true",
+                   help="Print a machine-readable summary on stdout (for the "
+                        "website's export button)")
+    p.add_argument("-v", "--verbose", action="store_true")
+    return p
+
+
+def best_main(argv: list[str]) -> int:
+    args = build_best_parser().parse_args(argv)
+    # Logs go to stderr so --json keeps stdout clean for the caller.
+    logging.basicConfig(
+        level=logging.DEBUG if args.verbose else logging.INFO,
+        format="%(levelname)s %(name)s: %(message)s",
+        stream=sys.stderr,
+    )
+
+    results_path = Path("reports") / "results.json"
+    if args.cached:
+        if not results_path.exists():
+            print(f"No saved results at {results_path}; run without --cached "
+                  "first.", file=sys.stderr)
+            return 1
+        # Re-score rather than replay the saved breakdowns: a breakdown is a
+        # pure function of the event, so anything tuned in config.py since
+        # the scrape (prices, capture rate, fee tiers) takes effect here
+        # without a re-crawl.
+        scored = [
+            scoring.score_event(s.event)
+            for s in persist.load_results(results_path)
+        ]
+        scored.sort(key=lambda s: s.breakdown.score, reverse=True)
+    else:
+        # Crawl a little past the horizon so the last weekend is fully covered.
+        settings = config.Settings.from_env(
+            weeks_ahead=args.months * 5,
+            max_drive_hours=args.max_drive_hours,
+            refresh=args.refresh,
+            jobs=args.jobs,
+        )
+        if args.states:
+            settings.states = args.states
+        scored = pipeline.run(settings)
+        if not scored:
+            print("No qualifying events found.", file=sys.stderr)
+            return 1
+        persist.save_results(scored, results_path)
+
+    plan = best.build_plan(
+        scored, months=args.months, top=args.top, max_repeats=args.max_repeats
+    )
+    if not plan:
+        print("No bookable weekend shows in the window.", file=sys.stderr)
+        return 1
+    csv_path = best.export_plan(plan, base_dir=args.out)
+
+    weekends = sorted({s.weekend for s in plan})
+    if args.json:
+        import json
+        print(json.dumps({
+            "csv": str(csv_path),
+            "spec": str(csv_path.parent / "SPEC.md"),
+            "shows": len(plan),
+            "weekends": len(weekends),
+            "first_weekend": weekends[0].isoformat(),
+            "last_weekend": weekends[-1].isoformat(),
+            "columns": best.COLUMNS,
+        }))
+        return 0
+
+    print(f"\n{len(plan)} shows across {len(weekends)} weekends "
+          f"({weekends[0]:%b %d} - {weekends[-1]:%b %d, %Y})\n")
+    for weekend in weekends:
+        rows = [s for s in plan if s.weekend == weekend]
+        print(f"  Weekend of {weekend:%b %d}")
+        for slot in rows:
+            e, b = slot.scored.event, slot.scored.breakdown
+            print(f"    ${b.est_profit:>8,.0f} profit  "
+                  f"{best.drive_time(e.drive_hours):>8}  "
+                  f"{e.city}, {e.state}  {e.name[:44]}")
+    print(f"\nCSV:  {csv_path}")
+    print(f"Spec: {csv_path.parent / 'SPEC.md'}")
+    return 0
+
+
 def apply_main(argv: list[str]) -> int:
     args = build_apply_parser().parse_args(argv)
     logging.basicConfig(
@@ -136,6 +249,8 @@ def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:]) if argv is None else list(argv)
     if argv[:1] == ["apply"]:
         return apply_main(argv[1:])
+    if argv[:1] == ["best"]:
+        return best_main(argv[1:])
     args = build_parser().parse_args(argv)
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,

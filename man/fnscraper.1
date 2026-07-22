@@ -1,0 +1,189 @@
+.TH FNSCRAPER 1 "2026-07-20" "fnscraper" "Festival Profitability Scraper"
+.SH NAME
+fnscraper \- find the most profitable festivals for a salsa vendor within driving range
+.SH SYNOPSIS
+.B python -m fnscraper
+.RI [ options ]
+.br
+.B python -m fnscraper best
+.RI [ options ]
+.br
+.B python -m fnscraper apply
+.RI [ file ]
+.RI [ options ]
+.SH DESCRIPTION
+.B fnscraper
+scans upcoming fairs, festivals, expos, and craft shows on
+festivalnet.com within a 10-hour drive of Zanesville, Ohio, scores each one
+by out-of-pocket cost versus expected salsa sales, and opens an interactive
+picker so you can choose which shows to pursue.
+.PP
+When the scrape finishes in a real terminal, a scrolling checkbox list opens,
+sorted by state, date, then cost. Each row shows the estimated cost to sell
+one jar (\fB$/JAR\fR), total show cost, drive time, location, and date.
+.SH GETTING STARTED
+The three commands you need, in order:
+.TP
+.B 1. Install dependencies (once)
+.B pip install -r requirements.txt
+.TP
+.B 2. Find and pick shows
+.B python -m fnscraper --weeks 8
+.br
+Scrapes, then opens the picker. Your picks are saved to \fBreports/\fR.
+.TP
+.B 3. Download and fill vendor applications for your picks
+.B python -m fnscraper apply
+.br
+Reads \fBreports/selected_shows.csv\fR and saves applications to
+\fBapplications/\fR.
+.SH USING THE PICKER
+.TP
+.B SPACE
+Check / uncheck the show at the cursor.
+.TP
+.B UP / DOWN, PgUp / PgDn
+Scroll the list.
+.TP
+.B ENTER
+Save your checked shows and exit.
+.TP
+.B q
+Quit without saving.
+.SH COMMON OPTIONS
+.TP
+.BI --weeks " N"
+How many weeks ahead to scan (default: 8).
+.TP
+.BI --states " STATE..."
+Limit the crawl to specific states, e.g. \fB--states Ohio Pennsylvania\fR.
+Default is every state within reach.
+.TP
+.BI --max-drive-hours " H"
+One-way drive-time limit (default: 10).
+.TP
+.BI --top " N"
+Number of events to show per weekend in the report (default: 5).
+.TP
+.BI --deadline-by " YYYY-MM-DD"
+Only show events whose application deadline is still open on or before this
+date.
+.TP
+.B --browse
+Reopen the picker on the last scrape's results without hitting the network.
+.TP
+.B --refresh
+Ignore the page cache and re-fetch everything.
+.TP
+.B --no-pick
+Skip the picker; just print the list and write the reports.
+.TP
+.B -v, --verbose
+Show detailed progress logging.
+.SH THE BOOKING PLAN
+.B python -m fnscraper best
+answers "what should I book for the next three months?" in one command. For
+every weekend in the window it picks the five most profitable shows still
+open for applications and writes them as a CSV for the Jose Madrid Salsa
+admin panel, under
+.BR reports/josemadridsalsa/export <MMDDYY>- <MMDDYY>/ .
+The stamps are the first and last event date in the file.
+.PP
+A show earns a slot only if it runs on a bookable day \(em Wed through Sun,
+Fri/Sat/Sun preferred. Mon/Tue-only shows are dropped; shows missing the
+prime days are ranked as if worth 30% less. Passed deadlines are dropped,
+and one recurring market may hold at most two weekends.
+.TP
+.B \-\-months N
+Months ahead to plan (default 3).
+.TP
+.B \-\-top N
+Shows per weekend (default 5).
+.TP
+.B \-\-max\-repeats N
+Weekends one recurring show may occupy (default 2).
+.TP
+.B \-\-cached
+Re-plan from the last scrape instead of hitting the network. Returns in
+about a second.
+.TP
+.B \-\-json
+Print a machine-readable summary on stdout; progress goes to stderr. Used
+by the website's export button.
+.SH OUTPUT
+Every full run writes to \fBreports/\fR:
+.TP
+.B selected_shows.xlsx / .csv / .md
+Your picked shows with every data field (identity, dates, location,
+attendance, fees, cost and profit estimates).
+.TP
+.B shortlist.md
+A readable per-show summary with apply deadlines and links.
+.TP
+.B weekend_picks.md
+Top picks for each upcoming weekend.
+.TP
+.B all_events.csv
+Every scored event.
+.TP
+.B results.json
+Saved results that power \fB--browse\fR.
+.TP
+.B josemadridsalsa/export<MMDDYY>-<MMDDYY>/
+The booking plan written by \fBfnscraper best\fR: the import CSV plus a
+\fBSPEC.md\fR documenting every column.
+.SH CREDENTIALS
+FestivalNet hides the useful details behind a Pro membership. When Pro
+credentials are configured, fnscraper logs in and picks up the real booth
+fee, per-track application deadlines, how and where to apply, the show and
+exhibit director's name, phone and email, and the promoter's website.
+Without a login those are estimated (flagged with \fB~\fR in reports and
+\fB*\fR in the booking-plan CSV) or simply absent.
+.PP
+Credentials are read from a gitignored \fB.env\fR file in the project root:
+.PP
+.RS
+.nf
+FESTIVALNET_USER=your-username
+FESTIVALNET_PASS=your-password
+.fi
+.RE
+.PP
+A real shell \fBexport\fR of the same variables overrides the file.
+.SH FILES
+.TP
+.B .env
+FestivalNet Pro credentials (gitignored).
+.TP
+.B vendor_profile.json
+Your contact info used to auto-fill applications. Copy
+\fBvendor_profile.example.json\fR to this name and edit it.
+.TP
+.B reports/
+Generated reports and the saved results.
+.TP
+.B applications/
+Downloaded and auto-filled vendor applications.
+.SH EXAMPLES
+.TP
+Longer horizon, more picks per weekend:
+.B python -m fnscraper --weeks 12 --top 8
+.TP
+Tighter radius, only two states:
+.B python -m fnscraper --states Ohio Pennsylvania --max-drive-hours 6
+.TP
+Only shows you can still apply to by month's end:
+.B python -m fnscraper --deadline-by 2026-08-31
+.TP
+Re-open your last results without re-scraping:
+.B python -m fnscraper --browse
+.TP
+Build the next three months of weekend bookings:
+.B python -m fnscraper best
+.TP
+Rebuild the plan from the last scrape, six shows a weekend:
+.B python -m fnscraper best --cached --top 6
+.SH NOTES
+Always review every auto-filled PDF before sending it to a promoter.
+.SH SEE ALSO
+Project README for the full scoring model and tuning knobs.

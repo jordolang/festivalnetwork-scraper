@@ -2,11 +2,13 @@
 
 The model estimates, for each event:
 
-    revenue  = buyers x average sale
     buyers   = capture(attendance) x category fit x admission factor
                x competition factor x data-quality factor
+    revenue  = buyers x average order          (from the deal ladder)
+    jars     = buyers x jars per order         (a $25 order is 3 jars)
+    cogs     = buyers x cost of goods per order
     cost     = booth fee + fuel + lodging + meals          (out of pocket)
-    profit   = revenue - cost of goods - cost
+    profit   = revenue - cogs - cost
     ROI      = profit / cost
 
 The final ranking score is ``profit x sqrt(ROI)`` — it rewards absolute
@@ -47,9 +49,18 @@ def _booth_fee(event: Event, attendance: int) -> tuple[float, bool]:
 
 
 def _event_days(event: Event) -> int:
-    if event.start_date and event.end_date and event.end_date >= event.start_date:
-        return (event.end_date - event.start_date).days + 1
-    return 1
+    """Days you would actually work — see Event.occurrence_days."""
+    return max(1, event.occurrence_days())
+
+
+def _schedule_note(event: Event) -> str | None:
+    source = event.schedule_source()
+    if source == "assumed":
+        return ("no hours published; a run this long was assumed to be a "
+                "Fri-Sun series — confirm the dates with the promoter")
+    if source == "text":
+        return "show days read from the listing's name/description, not its hours"
+    return None
 
 
 def score_event(event: Event) -> ScoredEvent:
@@ -71,6 +82,9 @@ def score_event(event: Event) -> ScoredEvent:
         b.exhibitors_estimated = True
 
     days = _event_days(event)
+    note = _schedule_note(event)
+    if note:
+        b.notes.append(note)
 
     # -- demand-side multipliers ---------------------------------------
     b.category_fit = _category_fit(event.category_slug)
@@ -111,14 +125,29 @@ def score_event(event: Event) -> ScoredEvent:
         * b.admission_factor
         * b.quality_factor
     )
+    # House rule: 1 sale per 40 visitors "or better".  The multipliers can
+    # push the estimate above the floor but not below it.
+    if config.MIN_CAPTURE_RATE is not None:
+        floor = config.MIN_CAPTURE_RATE * b.est_attendance
+        if b.est_buyers < floor:
+            b.est_buyers = floor
+            b.notes.append(
+                f"conversion held at the {config.MIN_CAPTURE_RATE:.3%} floor "
+                "(1 sale per 40 attendees)"
+            )
     throughput_cap = config.MAX_DAILY_TRANSACTIONS * days
     if b.est_buyers > throughput_cap:
         b.est_buyers = throughput_cap
         b.notes.append(
             f"sales capped at booth throughput ({config.MAX_DAILY_TRANSACTIONS}/day)"
         )
-    b.gross_revenue = b.est_buyers * config.AVG_SALE
-    b.cogs = b.gross_revenue * config.UNIT_COST_RATIO
+    # Everything is priced per *order*, because customers buy packages: the
+    # $25 average order is the 3-for-$25 deal, so it moves three jars.
+    # Dividing revenue by the single-jar price would call that 2.5 jars and
+    # quietly understate the salsa consumed to earn it.
+    b.gross_revenue = b.est_buyers * config.avg_sale()
+    b.jars_sold = b.est_buyers * config.jars_per_order()
+    b.cogs = b.est_buyers * config.cogs_per_order()
 
     # -- out-of-pocket cost ----------------------------------------------
     b.booth_fee, b.booth_fee_estimated = _booth_fee(event, b.est_attendance)
@@ -141,7 +170,6 @@ def score_event(event: Event) -> ScoredEvent:
     b.est_profit = b.gross_revenue - b.cogs - b.total_cost
     b.roi = b.est_profit / b.total_cost if b.total_cost > 0 else 0.0
 
-    b.jars_sold = b.gross_revenue / config.JAR_PRICE
     b.cost_per_jar = b.total_cost / b.jars_sold if b.jars_sold > 0 else float("inf")
 
     if b.est_profit <= 0 or b.roi <= 0:
