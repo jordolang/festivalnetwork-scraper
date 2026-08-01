@@ -10,6 +10,8 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 
+from . import categories
+
 BASE_URL = "https://festivalnet.com"
 
 # Home base: Zanesville, Ohio
@@ -151,6 +153,10 @@ class Settings:
     """Runtime settings assembled from defaults + CLI flags."""
 
     states: list[str] = field(default_factory=lambda: list(DEFAULT_STATES))
+    # Which vendor-facing categories to crawl.  ``None`` means "everything";
+    # the default drops fairs (see ``categories.default_selection``).
+    categories: set[str] | None = field(
+        default_factory=categories.default_selection)
     weeks_ahead: int = 8
     max_drive_hours: float = MAX_DRIVE_HOURS
     top_per_weekend: int = 5

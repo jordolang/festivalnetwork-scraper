@@ -8,7 +8,8 @@ import sys
 from datetime import date
 from pathlib import Path
 
-from . import apps, config, export, importer, pdf_fill, persist, pipeline, report, tui
+from . import (apps, categories, config, export, importer, pdf_fill, persist,
+               pipeline, report, tui)
 from .http import Fetcher
 
 
@@ -26,6 +27,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--states", nargs="*", default=None, metavar="STATE",
                    help="State page slugs to crawl (default: all states "
                         "within reach, e.g. Ohio West-Virginia)")
+    cat_keys = ", ".join(c.key for c in categories.CATEGORIES)
+    p.add_argument("--categories", nargs="*", default=None, metavar="CAT",
+                   help="Only include these categories (default: everything "
+                        f"except fairs). Choices: {cat_keys}. "
+                        "See --list-categories.")
+    p.add_argument("--include-fairs", action="store_true",
+                   help="Add fairs back in (they are excluded by default)")
+    p.add_argument("--all-categories", action="store_true",
+                   help="Include every category, fairs included")
+    p.add_argument("--list-categories", action="store_true",
+                   help="List selectable category keys and exit")
     p.add_argument("--max-drive-hours", type=float, default=config.MAX_DRIVE_HOURS,
                    help="One-way drive-time limit (default: 10)")
     p.add_argument("--top", type=int, default=5,
@@ -127,6 +139,26 @@ def apply_main(argv: list[str]) -> int:
     return 0
 
 
+def resolve_categories(args) -> set[str]:
+    """Turn the category-related CLI flags into a set of active keys."""
+    if args.all_categories:
+        selected = categories.all_keys()
+    elif args.categories:
+        selected, unknown = categories.normalize_keys(args.categories)
+        if unknown:
+            print(f"Ignoring unknown categor{'y' if len(unknown) == 1 else 'ies'}: "
+                  + ", ".join(unknown))
+        if not selected:
+            print("No valid categories selected; run --list-categories to see "
+                  "the choices.")
+            raise SystemExit(1)
+    else:
+        selected = categories.default_selection()
+    if args.include_fairs:
+        selected.add("fair")
+    return selected
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:]) if argv is None else list(argv)
     if argv[:1] == ["apply"]:
@@ -136,6 +168,13 @@ def main(argv: list[str] | None = None) -> int:
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(levelname)s %(name)s: %(message)s",
     )
+
+    if args.list_categories:
+        print("Categories you can pass to --categories:")
+        for c in categories.CATEGORIES:
+            default = "" if c.key in categories.default_selection() else "  (off by default)"
+            print(f"  {c.key:16}{c.label}{default}")
+        return 0
 
     settings = config.Settings.from_env(
         weeks_ahead=args.weeks,
@@ -147,6 +186,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     if args.states:
         settings.states = args.states
+    settings.categories = resolve_categories(args)
 
     out_dir = Path(settings.output_dir)
     results_path = out_dir / "results.json"
@@ -156,10 +196,21 @@ def main(argv: list[str] | None = None) -> int:
             print(f"No saved results at {results_path}; run a scrape first.")
             return 1
         scored = persist.load_results(results_path)
+        # Saved results may include categories the current flags exclude
+        # (e.g. a prior --all-categories scrape); honor the filter on reopen.
+        before = len(scored)
+        scored = categories.filter_scored(scored, settings.categories)
+        if not scored:
+            print("No saved events match the selected categories. Try "
+                  "--all-categories or --include-fairs.")
+            return 1
+        if len(scored) != before:
+            print(f"Category filter: showing {len(scored)} of {before} saved events.")
     else:
         scored = pipeline.run(settings)
         if not scored:
-            print("No qualifying events found. Try --weeks or --refresh.")
+            print("No qualifying events found. Try --weeks, --refresh, or a "
+                  "wider --categories selection.")
             return 1
         persist.save_results(scored, results_path)
 

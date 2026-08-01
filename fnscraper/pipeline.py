@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from datetime import date, timedelta
 
-from . import config, parse
+from . import categories, config, parse
 from .geocode import Geocoder, drive_estimate
 from .http import Fetcher
 from .models import Event, ScoredEvent
@@ -58,6 +58,17 @@ def run(settings: config.Settings) -> list[ScoredEvent]:
     for state in settings.states:
         for ev in crawl_state(fetcher, state, horizon, settings.max_pages_per_state):
             seen.setdefault(ev.event_id, ev)
+
+    # 1b. Drop unwanted categories (e.g. fairs) up front so we never spend
+    #     geocoding or detail-fetch budget on shows the vendor won't work.
+    if settings.categories is not None:
+        before = len(seen)
+        seen = {
+            eid: ev for eid, ev in seen.items()
+            if categories.category_key(ev.category_slug) in settings.categories
+        }
+        log.info("category filter kept %d of %d listings (%s)",
+                 len(seen), before, ", ".join(sorted(settings.categories)))
 
     # 2. Keep events inside the date window.
     upcoming = [
