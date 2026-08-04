@@ -11,6 +11,7 @@ Keys:
     UP/DOWN, PgUp/PgDn, Home/End   scroll
     SPACE                           check/uncheck the show next to the cursor
     o                               toggle event-date/deadline ordering
+    m                               put missed deadlines first
     c                               choose which categories to show
     d                               open the event-detail popup for the row
     ENTER or s                      save checked shows and exit
@@ -19,17 +20,26 @@ Keys:
 
 from __future__ import annotations
 
-import curses
+try:
+    import curses
+except ImportError:                  # pragma: no cover - Windows without
+    curses = None                    # windows-curses installed
 import re
 import textwrap
 from datetime import date, datetime
 from typing import NamedTuple
 
-from . import categories
+from . import categories, config
 from .models import ScoredEvent
 
+def unit_label() -> str:
+    """The product noun for column headers, e.g. JAR / CANDLE."""
+    return config.UNIT_NAME.upper()[:6]
+
+
 HELP_LINE = (
-    "SPACE select   o order   c categories   d details   ENTER save+exit   "
+    "SPACE select   o event/deadline   m missed   c categories   d details   "
+    "ENTER save+exit   "
     "q quit without saving   up/down scroll"
 )
 HEADER_FMT = "    {st:2}  {deadline:11}  {date:11}  {cpj:>9}  {booth:>8}  {cost:>9}  {drive:>6}  {name}"
@@ -146,7 +156,7 @@ def _detail_lines(s: ScoredEvent) -> list[DetailLine]:
 
     # The money — your profitability model
     head("PROFITABILITY (estimated)")
-    field("Jars sold", f"{b.jars_sold:,.0f}")
+    field(f"{config.UNIT_NAME.capitalize()}s sold", f"{b.jars_sold:,.0f}")
     field("Gross rev", _money(b.gross_revenue))
     field("COGS", _money(b.cogs))
     booth = _money(b.booth_fee) + ("  (est.)" if b.booth_fee_estimated else "")
@@ -157,7 +167,7 @@ def _detail_lines(s: ScoredEvent) -> list[DetailLine]:
     field("Total cost", _money(b.total_cost))
     field("Est. profit", _money(b.est_profit))
     field("ROI", f"{b.roi:.2f}x per out-of-pocket $")
-    field("Cost / jar", _money(b.cost_per_jar))
+    field(f"Cost / {config.UNIT_NAME}", _money(b.cost_per_jar))
     field("Score", f"{b.score:.1f}")
 
     if b.notes:
@@ -183,9 +193,8 @@ _DEADLINE_PATTERNS = (
 )
 
 
-def deadline_date(text: str, today: date | None = None) -> date | None:
-    """Return the earliest upcoming date found in deadline text."""
-    today = today or date.today()
+def _parsed_deadlines(text: str, today: date) -> list[date]:
+    """Return all recognizable deadline dates, including missed ones."""
     found: list[date] = []
     for pattern in _DEADLINE_PATTERNS:
         for raw in re.findall(pattern, text, flags=re.I):
@@ -201,6 +210,13 @@ def deadline_date(text: str, today: date | None = None) -> date | None:
                     break
                 except ValueError:
                     continue
+    return found
+
+
+def deadline_date(text: str, today: date | None = None) -> date | None:
+    """Return the earliest upcoming date found in deadline text."""
+    today = today or date.today()
+    found = _parsed_deadlines(text, today)
     upcoming = [d for d in found if d >= today]
     return min(upcoming) if upcoming else None
 
@@ -225,6 +241,15 @@ def sort_for_picker(scored: list[ScoredEvent], order: str = "event") -> list[Sco
             s.event.state or "~",
             s.breakdown.total_cost,
         ))
+    if order == "missed":
+        today = date.today()
+        return sorted(scored, key=lambda s: (
+            0 if any(d < today for d in _parsed_deadlines(s.event.deadlines, today)) else 1,
+            min(_parsed_deadlines(s.event.deadlines, today), default=date.max),
+            s.event.start_date or date.max,
+            s.event.state or "~",
+            s.breakdown.total_cost,
+        ))
     return sorted(
         scored,
         key=lambda s: (
@@ -242,7 +267,9 @@ def format_row(s: ScoredEvent, checked: bool) -> str:
     if e.end_date and e.end_date != e.start_date:
         when += f"-{e.end_date:%d}"
     mark = "[x]" if checked else "[ ]"
-    deadline = deadline_date(e.deadlines)
+    today = date.today()
+    parsed = _parsed_deadlines(e.deadlines, today)
+    deadline = deadline_date(e.deadlines, today) or min(parsed, default=None)
     deadline_text = f"{deadline:%b %d}" if deadline else "?"
     name = f"{e.name} — {e.city}"
     # Booth-space fee on its own; ~ marks an estimate (see module docstring).
@@ -410,7 +437,7 @@ def _draw(stdscr, rows: list[ScoredEvent], checked: set[str],
              f"— order: {order}{cat_summary} ")
     stdscr.addnstr(0, 0, title.ljust(width - 1), width - 1, curses.A_BOLD)
     header = HEADER_FMT.format(
-        st="ST", deadline="DEADLINE", date="DATE", cpj="$/JAR", booth="BOOTH $",
+        st="ST", deadline="DEADLINE", date="DATE", cpj=f"$/{unit_label()}", booth="BOOTH $",
         cost="SHOW $", drive="DRIVE", name="EVENT"
     )
     stdscr.addnstr(1, 0, header.ljust(width - 1), width - 1, curses.A_UNDERLINE)
@@ -492,6 +519,13 @@ def _picker(stdscr, scored: list[ScoredEvent]) -> list[ScoredEvent] | None:
             cursor = next((i for i, s in enumerate(rows)
                            if s.event.event_id == current_id), 0)
             top = cursor
+        elif key == ord("m"):
+            current_id = rows[cursor].event.event_id if rows else None
+            order = "event" if order == "missed" else "missed"
+            rows = rebuild()
+            cursor = next((i for i, s in enumerate(rows)
+                           if s.event.event_id == current_id), 0)
+            top = cursor
         elif key == ord("c"):
             current_id = rows[cursor].event.event_id if rows else None
             chosen = _category_modal(stdscr, scored, active)
@@ -512,8 +546,27 @@ def _picker(stdscr, scored: list[ScoredEvent]) -> list[ScoredEvent] | None:
             return None
 
 
+class PickerUnavailable(RuntimeError):
+    """No curses on this interpreter, so the checkbox list cannot open."""
+
+
+def picker_available() -> bool:
+    return curses is not None
+
+
 def run_picker(scored: list[ScoredEvent]) -> list[ScoredEvent] | None:
     """Open the picker.  Returns checked shows, or None if quit unsaved."""
+    if curses is None:
+        # Windows' standard library ships no curses; the wheel that
+        # supplies it is in requirements.txt.  Everything else in the
+        # tool works without it, so this must never be an import-time
+        # failure - it would take the whole program down over a list.
+        raise PickerUnavailable(
+            "The interactive show picker needs the 'windows-curses' "
+            "package. Install it with:  pip install windows-curses"
+        )
+    # Sorting happens inside _picker now, which re-sorts on every category
+    # change; the full list has to reach it so hidden shows stay selectable.
     if not scored:
         return []
     return curses.wrapper(_picker, list(scored))
@@ -523,7 +576,7 @@ def print_plain_list(scored: list[ScoredEvent]) -> None:
     """Non-interactive fallback: same list, same order, no curses."""
     rows = sort_for_picker(scored)
     print(HEADER_FMT.format(
-        st="ST", deadline="DEADLINE", date="DATE", cpj="$/JAR", booth="BOOTH $",
+        st="ST", deadline="DEADLINE", date="DATE", cpj=f"$/{unit_label()}", booth="BOOTH $",
         cost="SHOW $", drive="DRIVE", name="EVENT"
     ))
     for s in rows:

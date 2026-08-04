@@ -1,0 +1,20 @@
+{
+  "business_name": "YOUR BUSINESS NAME",
+  "contact_name": "YOUR NAME",
+  "address": "YOUR STREET ADDRESS",
+  "city": "YOUR CITY",
+  "state": "OH",
+  "zip": "00000",
+  "phone": "(000) 000-0000",
+  "email": "you@example.com",
+  "website": "https://www.example.com",
+  "product_description": "WHAT YOU SELL",
+  "category": "YOUR VENDOR CATEGORY",
+  "booth_size": "10x10",
+  "electric_needed": "No",
+  "years_in_business": "1",
+  "tax_id": "YOUR TAX ID",
+  "vendors_license": "None",
+  "insurance_carrier": "YOUR INSURANCE CARRIER",
+  "signature_date": ""
+}

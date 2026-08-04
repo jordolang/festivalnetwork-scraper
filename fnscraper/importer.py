@@ -70,7 +70,7 @@ def _row_to_scored(record: dict) -> ScoredEvent:
 
 
 def _read_csv(path: Path) -> list[dict]:
-    with path.open(newline="") as fh:
+    with path.open(newline="", encoding="utf-8-sig") as fh:
         return list(csv.DictReader(fh))
 
 

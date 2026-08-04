@@ -1,0 +1,7 @@
+# Windows launchers must reach the PC with CRLF endings or cmd.exe
+# mis-parses labels and multi-line blocks. Applies to GitHub's ZIP
+# download too, which honours these attributes.
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+*.ico binary
