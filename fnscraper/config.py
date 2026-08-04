@@ -8,25 +8,37 @@ ranking events against each other, not predicting exact dollars.
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
 BASE_URL = "https://festivalnet.com"
+
+# Whose booth this is.  Overridden by business.json; the export directory
+# and the import spec's title are derived from it, so a second business
+# never writes into the first one's folder.
+BUSINESS_NAME = "Jose Madrid Salsa"
+BUSINESS_SLUG = "josemadridsalsa"
+
+# What one unit of product is called, for report and picker labels only.
+# The underlying field names (cost_per_jar, jars_sold) stay fixed so the
+# CSV contract does not move when a candle vendor installs this.
+UNIT_NAME = "jar"
 
 # Home base: Zanesville, Ohio
 HOME_NAME = "Zanesville, OH"
 HOME_LAT = 39.9403
 HOME_LON = -82.0132
 
-# Hard travel limit requested: 10 hours of driving, one way.
-MAX_DRIVE_HOURS = 10.0
+# Hard travel limit requested: 15 hours of driving, one way.
+MAX_DRIVE_HOURS = 15.0
 
 # Straight-line miles are converted to road miles with a circuity factor
 # (US road networks average ~1.2-1.3x the great-circle distance), then to
 # hours at an average long-haul speed that mixes interstate and surface
 # roads.
 ROAD_CIRCUITY = 1.25
-AVG_MPH = 58.0
+AVG_MPH = 65.0
 
 # States whose events can plausibly fall inside a 10 h drive of
 # Zanesville.  The distance filter makes the final cut; this list just
@@ -52,14 +64,19 @@ DEFAULT_STATES = [
     "Georgia",
     "Connecticut",
     "District-of-Columbia",
+    "Florida",
+    "Maine",
+    "Missouri",
+    "Alabama",
+    "Rhode Island",
 ]
 
 # ---------------------------------------------------------------------------
 # Vehicle / trip cost model (out-of-pocket dollars)
 # ---------------------------------------------------------------------------
 MPG = 20.0                 # loaded van/truck pulling product
-GAS_PRICE = 3.30           # $/gallon
-LODGING_PER_NIGHT = 110.0  # modest hotel
+GAS_PRICE = 4.00           # $/gallon
+LODGING_PER_NIGHT = 150.0  # modest hotel
 MEALS_PER_DAY = 35.0       # per diem on the road
 # One-way drives longer than this require a hotel the night before each
 # show day (you can't set up a booth at 7am after a 6-hour drive).
@@ -176,18 +193,33 @@ def jar_cost() -> float:
         return (BATCH_INGREDIENT_COST + BATCH_PACKAGING_COST) / BATCH_JARS
     return JAR_COST
 
-# Fraction of attendees who buy from the booth.  The house rule is
-# "roughly 1 sale per 40 visitors, or better", so the baseline capture is
-# 1/40 = 0.025 and scales linearly with attendance (exponent 1.0).
-# Demand multipliers (category fit, competition, admission, data quality)
-# move the real number up or down from there.
-CAPTURE_RATE = 0.025               # 1 buyer per 40 attendees
-CAPTURE_EXPONENT = 1.0             # linear in attendance
+# Booth-level conversion, NOT gate conversion.  Reported festival
+# attendance and the customers who actually pass *your* booth and buy are
+# different measurements: the gate counts everyone through the day, most of
+# whom never reach your row.  CAPTURE_RATE therefore bundles both the
+# fraction of the gate that walks by and the fraction of those who buy — it
+# is deliberately far below the old "1 sale per 40 of the gate" (0.025)
+# house rule, which treated attendance as if it were booth exposure.
+#
+# Calibrated at a reference-size event (CAPTURE_REF_ATTENDANCE): at that
+# size, base buyers = CAPTURE_RATE x attendance.  0.008-0.012 is the range
+# to test against real till data; 0.010 is the working midpoint.
+CAPTURE_RATE = 0.010
+CAPTURE_REF_ATTENDANCE = 2_500     # size at which CAPTURE_RATE is the fraction
 
-# "or better": after the multipliers are applied, never model a worse
-# conversion than 1-in-40 of the gate.  Set to None to let a bad category
-# fit / crowded field drag the estimate below the floor.
-MIN_CAPTURE_RATE = 0.025
+# Sub-linear in attendance: a crowd twice as large does not hand you twice
+# the sales — one booth, one line, finite dwell time, and the far end of a
+# mega-event never reaches your row.  buyers scale as
+# (attendance / CAPTURE_REF_ATTENDANCE) ** CAPTURE_EXPONENT, so the rate is
+# anchored at the reference size and diminishes above it (and, fairly, runs
+# a little richer at small intimate markets where everyone walks past).
+CAPTURE_EXPONENT = 0.85            # < 1.0: diminishing returns on crowd size
+
+# No conversion floor.  A floor equal to the base rate (the old 0.025 ==
+# CAPTURE_RATE) silently erased every downward multiplier — bad category
+# fit, a crowded field, paid admission — turning an optimistic assumption
+# into a guaranteed minimum.  None lets those penalties actually bite.
+MIN_CAPTURE_RATE = None
 
 # One booth can only ring up so many sales in a day, no matter how big
 # the crowd — this caps mega-event projections at physical reality.
@@ -202,8 +234,8 @@ IDEAL_ATTENDEES_PER_EXHIBITOR = 150.0
 CATEGORY_FIT = {
     "food": 1.20,          # food festivals: buyers came hungry
     "farmers-market": 1.15,
-    "craft": 1.00,         # craft shows: classic packaged-food fit
-    "art": 0.85,           # fine-art buyers browse, still snack
+    "craft": 1.10,         # craft shows: classic packaged-food fit
+    "art": 1.00,           # fine-art buyers browse, still snack
     "fair": 1.10,          # county fairs, street fairs
     "festival": 1.05,      # general festivals
     "music": 0.90,         # music crowds buy food, less take-home
@@ -255,8 +287,8 @@ PRIME_WEEKDAYS = {4, 5, 6}                   # Fri/Sat/Sun — the money days
 PRIME_WEEKEND_BONUS = 1.00
 OFF_WEEKEND_PENALTY = 0.70
 
-BEST_MONTHS_AHEAD = 3          # planning horizon
-BEST_TOP_PER_WEEKEND = 5       # shows per weekend in the plan
+BEST_MONTHS_AHEAD = 6          # planning horizon
+BEST_TOP_PER_WEEKEND = 10       # shows per weekend in the plan
 BEST_EXPORT_DIR = "reports/josemadridsalsa"
 
 # ---------------------------------------------------------------------------
@@ -315,16 +347,20 @@ def load_dotenv(path: str | os.PathLike | None = None) -> None:
 class Settings:
     """Runtime settings assembled from defaults + CLI flags."""
 
+    # Every default that reads a module constant goes through a factory:
+    # a plain `= MAX_DRIVE_HOURS` binds when the class body runs, which is
+    # before business.json is applied, and would pin every install to the
+    # shipped defaults.
     states: list[str] = field(default_factory=lambda: list(DEFAULT_STATES))
     weeks_ahead: int = 8
-    max_drive_hours: float = MAX_DRIVE_HOURS
+    max_drive_hours: float = field(default_factory=lambda: MAX_DRIVE_HOURS)
     top_per_weekend: int = 5
     output_dir: str = "reports"
     cache_dir: str = "data/cache"
     geocode_cache: str = "data/geocode_cache.json"
     refresh: bool = False              # ignore HTTP cache
-    max_pages_per_state: int = MAX_PAGES_PER_STATE
-    jobs: int = DEFAULT_JOBS           # parallel FestivalNet fetches
+    max_pages_per_state: int = field(default_factory=lambda: MAX_PAGES_PER_STATE)
+    jobs: int = field(default_factory=lambda: DEFAULT_JOBS)
     username: str | None = None
     password: str | None = None
 
@@ -335,3 +371,20 @@ class Settings:
         s.username = s.username or os.environ.get(ENV_USERNAME)
         s.password = s.password or os.environ.get(ENV_PASSWORD)
         return s
+
+
+# ---------------------------------------------------------------------------
+# Per-business overrides.  Everything above is the default model; anything
+# the owner set up with `python -m fnscraper setup` is applied here, last,
+# so the rest of the package can keep reading plain `config.X`.
+# ---------------------------------------------------------------------------
+from . import business as _business      # noqa: E402  (must follow the defaults)
+
+BUSINESS = _business.apply(sys.modules[__name__])
+
+
+def reload_business(data: dict | None = None) -> dict:
+    """Re-read business.json into this module (used by the setup wizard)."""
+    global BUSINESS
+    BUSINESS = _business.apply(sys.modules[__name__], data)
+    return BUSINESS

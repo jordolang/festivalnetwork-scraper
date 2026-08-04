@@ -19,13 +19,22 @@ Keys:
 
 from __future__ import annotations
 
-import curses
+try:
+    import curses
+except ImportError:                  # pragma: no cover - Windows without
+    curses = None                    # windows-curses installed
 import re
 import textwrap
 from datetime import date, datetime
 from typing import NamedTuple
 
+from . import config
 from .models import ScoredEvent
+
+def unit_label() -> str:
+    """The product noun for column headers, e.g. JAR / CANDLE."""
+    return config.UNIT_NAME.upper()[:6]
+
 
 HELP_LINE = (
     "SPACE select   o event/deadline   m missed first   d details   ENTER save+exit   "
@@ -145,7 +154,7 @@ def _detail_lines(s: ScoredEvent) -> list[DetailLine]:
 
     # The money — your profitability model
     head("PROFITABILITY (estimated)")
-    field("Jars sold", f"{b.jars_sold:,.0f}")
+    field(f"{config.UNIT_NAME.capitalize()}s sold", f"{b.jars_sold:,.0f}")
     field("Gross rev", _money(b.gross_revenue))
     field("COGS", _money(b.cogs))
     booth = _money(b.booth_fee) + ("  (est.)" if b.booth_fee_estimated else "")
@@ -156,7 +165,7 @@ def _detail_lines(s: ScoredEvent) -> list[DetailLine]:
     field("Total cost", _money(b.total_cost))
     field("Est. profit", _money(b.est_profit))
     field("ROI", f"{b.roi:.2f}x per out-of-pocket $")
-    field("Cost / jar", _money(b.cost_per_jar))
+    field(f"Cost / {config.UNIT_NAME}", _money(b.cost_per_jar))
     field("Score", f"{b.score:.1f}")
 
     if b.notes:
@@ -364,7 +373,7 @@ def _draw(stdscr, rows: list[ScoredEvent], checked: set[str],
     title = f" FestivalNet picks — {len(rows)} shows, {len(checked)} selected — order: {order} "
     stdscr.addnstr(0, 0, title.ljust(width - 1), width - 1, curses.A_BOLD)
     header = HEADER_FMT.format(
-        st="ST", deadline="DEADLINE", date="DATE", cpj="$/JAR", booth="BOOTH $",
+        st="ST", deadline="DEADLINE", date="DATE", cpj=f"$/{unit_label()}", booth="BOOTH $",
         cost="SHOW $", drive="DRIVE", name="EVENT"
     )
     stdscr.addnstr(1, 0, header.ljust(width - 1), width - 1, curses.A_UNDERLINE)
@@ -435,8 +444,25 @@ def _picker(stdscr, rows: list[ScoredEvent]) -> list[ScoredEvent] | None:
             return None
 
 
+class PickerUnavailable(RuntimeError):
+    """No curses on this interpreter, so the checkbox list cannot open."""
+
+
+def picker_available() -> bool:
+    return curses is not None
+
+
 def run_picker(scored: list[ScoredEvent]) -> list[ScoredEvent] | None:
     """Open the picker.  Returns checked shows, or None if quit unsaved."""
+    if curses is None:
+        # Windows' standard library ships no curses; the wheel that
+        # supplies it is in requirements.txt.  Everything else in the
+        # tool works without it, so this must never be an import-time
+        # failure - it would take the whole program down over a list.
+        raise PickerUnavailable(
+            "The interactive show picker needs the 'windows-curses' "
+            "package. Install it with:  pip install windows-curses"
+        )
     rows = sort_for_picker(scored)
     if not rows:
         return []
@@ -447,7 +473,7 @@ def print_plain_list(scored: list[ScoredEvent]) -> None:
     """Non-interactive fallback: same list, same order, no curses."""
     rows = sort_for_picker(scored)
     print(HEADER_FMT.format(
-        st="ST", deadline="DEADLINE", date="DATE", cpj="$/JAR", booth="BOOTH $",
+        st="ST", deadline="DEADLINE", date="DATE", cpj=f"$/{unit_label()}", booth="BOOTH $",
         cost="SHOW $", drive="DRIVE", name="EVENT"
     ))
     for s in rows:

@@ -117,7 +117,16 @@ def score_event(event: Event) -> ScoredEvent:
         b.notes.append("listing not recently updated")
 
     # -- revenue ---------------------------------------------------------
-    base_buyers = config.CAPTURE_RATE * (b.est_attendance ** config.CAPTURE_EXPONENT)
+    # Booth-level buyers, anchored at CAPTURE_REF_ATTENDANCE so CAPTURE_RATE
+    # stays readable as "fraction at a typical-size event" while the crowd
+    # scaling stays sub-linear (CAPTURE_EXPONENT < 1): a gate twice as large
+    # yields 2**exponent, not 2x, the buyers.
+    ref = config.CAPTURE_REF_ATTENDANCE
+    base_buyers = (
+        config.CAPTURE_RATE
+        * ref
+        * (b.est_attendance / ref) ** config.CAPTURE_EXPONENT
+    )
     b.est_buyers = (
         base_buyers
         * b.category_fit

@@ -157,13 +157,15 @@ def test_an_order_mix_off_the_ladder_is_rejected(monkeypatch):
         config.avg_sale()
 
 
-def test_conversion_is_one_in_forty_at_baseline():
-    # 27 booths against 4,000 people is right at the ideal ratio, and an
-    # unstated admission is neutral, so nothing moves the 1-in-40 baseline.
-    b = score_event(
-        make_event(attendance=4_000, exhibitors=27, admission="")
-    ).breakdown
-    assert b.est_buyers == pytest.approx(4_000 / 40, rel=0.02)
+def test_conversion_scales_sublinearly_with_the_gate():
+    # Hold booths-per-head and every demand multiplier constant; only the
+    # gate doubles.  Buyers rise by 2**CAPTURE_EXPONENT, not 2x — one booth
+    # can't work a crowd twice as hard (diminishing returns on crowd size).
+    small = score_event(make_event(attendance=2_500, exhibitors=25)).breakdown
+    big = score_event(make_event(attendance=5_000, exhibitors=50)).breakdown
+    assert big.est_buyers / small.est_buyers == pytest.approx(
+        2 ** config.CAPTURE_EXPONENT, rel=0.01
+    )
 
 
 def test_free_admission_beats_the_baseline():
@@ -174,22 +176,28 @@ def test_free_admission_beats_the_baseline():
     assert free.est_buyers > neutral.est_buyers
 
 
-def test_conversion_never_drops_below_one_in_forty():
-    # Bad category fit and a crowded field would otherwise drag it under.
+def test_penalties_now_drag_conversion_below_the_old_floor():
+    # With MIN_CAPTURE_RATE removed, a bad category fit in a crowded field
+    # drags conversion below the retired 1-in-40 (0.025) baseline instead of
+    # being silently floored back up to it.
     b = score_event(
         make_event(attendance=4_000, exhibitors=400,
                    category_slug="Home-Garden-Shows")
     ).breakdown
-    assert b.est_buyers >= 4_000 * config.MIN_CAPTURE_RATE
-    assert any("1 sale per 40" in n for n in b.notes)
+    assert b.est_buyers < 4_000 * 0.025
+    assert not any("floor" in n for n in b.notes)
 
 
-def test_a_good_fit_beats_the_floor():
-    b = score_event(
+def test_a_good_fit_beats_a_poor_one():
+    good = score_event(
         make_event(attendance=4_000, exhibitors=15,
                    category_slug="Food-Festivals")
     ).breakdown
-    assert b.est_buyers > 4_000 * config.MIN_CAPTURE_RATE
+    poor = score_event(
+        make_event(attendance=4_000, exhibitors=15,
+                   category_slug="Home-Garden-Shows")
+    ).breakdown
+    assert good.est_buyers > poor.est_buyers
 
 
 def test_revenue_follows_the_average_order():

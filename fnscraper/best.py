@@ -377,7 +377,8 @@ def spec_markdown() -> str:
         f"| {i} | {name} | {desc} |"
         for i, (name, desc) in enumerate(zip(COLUMNS, _COLUMN_NOTES), start=1)
     )
-    return _SPEC_TEMPLATE.format(rows=rows, header=",".join(COLUMNS))
+    return _SPEC_TEMPLATE.format(rows=rows, header=",".join(COLUMNS),
+                                business=config.BUSINESS_NAME)
 
 
 _COLUMN_NOTES = [
@@ -405,7 +406,7 @@ _COLUMN_NOTES = [
     "Canonical FestivalNet listing URL. Use as the natural key on re-import.",
 ]
 
-_SPEC_TEMPLATE = """# Jose Madrid Salsa — show import format
+_SPEC_TEMPLATE = """# {business} — show import format
 
 One row per show. UTF-8 with BOM, `\\r\\n` line endings, RFC-4180 quoting
 (only fields containing a comma, quote, or newline are quoted).

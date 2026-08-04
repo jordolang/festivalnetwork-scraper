@@ -19,9 +19,14 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="fnscraper",
         description=(
-            "Find the most profitable festivals/fairs for a salsa vendor "
-            "within a drive-time radius of Zanesville, OH, using "
+            f"Find the most profitable festivals/fairs for {config.BUSINESS_NAME} "
+            f"within a drive-time radius of {config.HOME_NAME}, using "
             "festivalnet.com listings."
+        ),
+        epilog=(
+            "Subcommands: setup (configure this business), best (one-button "
+            "weekend booking plan), apply (download and fill in vendor "
+            "applications)."
         ),
     )
     p.add_argument("--weeks", type=int, default=8,
@@ -90,7 +95,7 @@ def build_best_parser() -> argparse.ArgumentParser:
         description=(
             "One-button booking plan: the most profitable bookable shows "
             "for every weekend over the next few months, exported as a CSV "
-            "the Jose Madrid Salsa admin panel can import."
+            f"the {config.BUSINESS_NAME} admin panel can import."
         ),
     )
     p.add_argument("--months", type=int, default=config.BEST_MONTHS_AHEAD,
@@ -251,6 +256,9 @@ def main(argv: list[str] | None = None) -> int:
         return apply_main(argv[1:])
     if argv[:1] == ["best"]:
         return best_main(argv[1:])
+    if argv[:1] == ["setup"]:
+        from . import setup_wizard
+        return setup_wizard.main(argv[1:])
     args = build_parser().parse_args(argv)
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
@@ -300,6 +308,11 @@ def main(argv: list[str] | None = None) -> int:
 
     # Interactive picker: on by default when attached to a real terminal.
     interactive = args.pick or (sys.stdout.isatty() and not args.no_pick)
+    if interactive and not tui.picker_available():
+        print("The interactive picker is unavailable on this Python "
+              "(no curses module); printing the list instead.\n"
+              "To enable it:  pip install windows-curses\n")
+        interactive = False
     if interactive:
         selected = tui.run_picker(scored)
         if selected is None:

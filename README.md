@@ -1,22 +1,191 @@
 # festivalnetwork-scraper
 
 Finds the **most profitable shows for the lowest out-of-pocket cost** for a
-salsa vendor working expos, fairs, festivals, and craft shows — scanning
-every upcoming weekend within a **10-hour drive of Zanesville, Ohio**.
+vendor working expos, fairs, festivals, and craft shows — scanning every
+upcoming weekend within driving distance of home.
+
+Set up once with your own home town, prices, costs, and travel limit, and
+it ranks every event it can find by what it should actually put in your
+pocket. It was built for a salsa vendor in Zanesville, Ohio, and those are
+still the built-in defaults, but nothing about it is specific to salsa or
+to Ohio — **[install it on a Windows PC](#install-it-on-a-windows-pc)** and
+it asks you for your own numbers.
 
 > **Note on the site:** `festivalnetwork.com` is a dead domain. The event
 > database this project scrapes is **[festivalnet.com](https://festivalnet.com)**
 > (FestivalNet), which lists 26,000+ North American events with public
 > attendance, exhibitor, admission, and location data.
 
-## Quick start
+---
+
+# Install it on a Windows PC
+
+**Everything below is for someone who has never opened a command prompt.
+There is nothing to install first, nothing to type, and nothing to
+configure by hand.**
+
+## 1. Download it
+
+Open [the project page on GitHub](https://github.com/jordolang/festivalnetwork-scraper),
+click the green **Code** button, then click **Download ZIP**. It lands in
+your **Downloads** folder.
+
+## 2. Unzip it
+
+Find `festivalnetwork-scraper-main.zip` in Downloads. **Right-click it →
+Extract All… → Extract.**
+
+> **This step matters.** If you double-click the installer while it is
+> still inside the ZIP, Windows only unpacks that one file and the
+> install will stop and tell you so. Extract first.
+
+## 3. Double-click **Install**
+
+Open the folder that appeared and double-click the file called
+**Install** (Windows may show it as `Install.cmd`).
+
+A blue box saying **"Windows protected your PC"** may appear. That is
+Windows being cautious about any file downloaded from the internet, not a
+sign of a problem. Click **More info**, then **Run anyway**.
+
+A black window opens and does the rest by itself:
+
+| Step | What happens | How long |
+|------|--------------|----------|
+| 1 | Checks the download is complete | instant |
+| 2 | Finds Python — **and installs it for you if the PC doesn't have it** | 0–2 min |
+| 3 | Copies the program to a permanent folder so it keeps working after you empty Downloads | seconds |
+| 4 | Builds its own private Python environment and downloads the libraries it needs | 1–2 min |
+| 5 | Puts three icons on your Desktop and in the Start Menu | seconds |
+| 6 | Asks you the questions below, so it plans shows using **your** prices | 3–5 min |
+
+No administrator password is needed, nothing else on the PC is changed,
+and no existing Python is modified.
+
+## 4. Answer the questions
+
+The last part of the install is a setup wizard. Every question shows a
+suggested answer in `[brackets]` — press **Enter** to accept it. Rough
+estimates are fine; you can change any of it later.
+
+| It asks | What it's for | Example |
+|---------|---------------|---------|
+| **Your business name** | Labels your reports and gives them their own folder | `Jose Madrid Salsa` |
+| **City, state, ZIP** | Every distance, fuel cost, and hotel decision is measured from here | `Zanesville`, `OH`, `43701` |
+| **Longest one-way drive** | Shows farther than this are ignored completely | `10` hours |
+| **Which states to search** | It works this out from your location and drive limit and shows you the list — press Enter to accept | 20 states |
+| **What you call one item** | Used on reports (`$/JAR`, `$/CANDLE`) | `jar` |
+| **Price of one item** | Your normal retail price | `10` |
+| **What it costs you to make one** | Ingredients + packaging for one item, not a percentage | `3.50` |
+| **Your usual multi-item deal** | Most customers buy a package, not one item — this is the single biggest driver of the estimate | `3` for `$25` |
+| **A cheap add-on** *(optional)* | Chips, a drink, a sample bag — and how many customers in 100 also buy one | `$3` chips, `12` in 100 |
+| **Miles per gallon** | Your loaded van or truck, not the sticker figure | `20` |
+| **Gas price** | Per gallon | `4.00` |
+| **Hotel per night** | Only charged when the drive is over 2½ hours | `150` |
+| **Food per day** | On the road | `35` |
+| **FestivalNet Pro login** *(optional)* | With one, it reads **real booth fees, application deadlines, and promoter emails** instead of estimating them. This is worth more than every other setting combined — see [Booth fees, deadlines, and promoter contacts](#booth-fees-deadlines-and-promoter-contacts) | your login |
+| **Your application details** | Name, address, phone, email, tax ID, booth size, insurance — these get typed into vendor applications for you | — |
+
+Nothing is saved until you confirm at the end, and the wizard shows you a
+summary first.
+
+## 5. Use it
+
+Three icons are now on the Desktop:
+
+| Icon | What it does |
+|------|--------------|
+| **Show Finder – Find My Shows** | Searches for the most profitable shows to book and opens the folder with the results |
+| **Show Finder – Pick Shows** | Opens the list of shows so you can tick the ones you want, then saves them to a spreadsheet |
+| **Show Finder – Settings** | Re-runs the questions above to change prices, costs, or how far you'll drive |
+
+Two more live in the Start Menu under **Show Finder**: *Get The
+Applications* (downloads and fills in vendor applications for the shows
+you ticked) and *Open My Results*.
+
+**The first search takes 45–75 minutes.** It reads a few thousand event
+listings and is deliberately slow so it doesn't hammer FestivalNet's
+site. Leave the window open — it prints what it's doing as it goes, and
+you can keep using the PC for other things. After that first run,
+re-planning takes seconds.
+
+## Changing your settings later
+
+Double-click **Show Finder – Settings**. It fills in everything you
+answered before, so you only change what you want and press Enter through
+the rest.
+
+Your answers live in a plain text file called `business.json` inside the
+install folder. Anyone comfortable editing text can open it directly —
+the wizard is just a friendlier way to write it:
+
+| In `business.json` | Means |
+|--------------------|-------|
+| `business_name` | Names your report folder (`reports/<your-business>/`) |
+| `home` | City, state, ZIP and map coordinates you start from |
+| `max_drive_hours` | One-way drive limit |
+| `states` | Which state listings get searched |
+| `product.unit_price` / `unit_cost` | What one item sells for / costs you to make |
+| `product.deal_units` / `deal_price` | Your usual package deal |
+| `product.addon_*` | The cheap add-on and how often it sells |
+| `travel.*` | mpg, gas price, hotel, food |
+| `planning.months_ahead` / `top_per_weekend` | How far ahead to plan and how many shows per weekend |
+| `advanced` | Any constant from [`fnscraper/config.py`](fnscraper/config.py), by its exact name — for tuning the model itself |
+
+Delete `business.json` and the program falls back to the built-in
+defaults. A bad edit is reported and ignored rather than crashing.
+
+## Setting it up for a different business
+
+Nothing in the download is specific to one business — the defaults are
+just the ones this project was first tuned on, and the setup wizard
+replaces every one of them. Install it on the new PC exactly as above and
+answer the questions with that business's own numbers.
+
+## Where it goes, and removing it
+
+Installed to `%LOCALAPPDATA%\Programs\ShowFinder` (per-user, no admin
+rights). Results, settings, and downloaded applications all live inside
+that folder. To remove it, open the Start Menu folder **Show Finder** →
+`Uninstall`, or run `Uninstall.bat` from the install folder.
+
+## If something goes wrong
+
+| What you see | What to do |
+|--------------|------------|
+| "Windows protected your PC" | Click **More info → Run anyway**. It appears for any downloaded file that isn't code-signed. |
+| "The program files are not all here" | The installer was run from inside the ZIP. Extract the ZIP first, then run Install from the extracted folder. |
+| "Python could not be downloaded" | The PC is offline or a company firewall is blocking it. Reconnect and run Install again, or install Python yourself from [python.org](https://www.python.org/downloads/) (tick **Add python.exe to PATH**) and re-run Install. |
+| "The libraries could not be installed" | Same cause — the connection or a firewall blocking `pypi.org`. Run Install again; nothing has to be undone first. |
+| A window flashes and vanishes | Run **Install** again and read the message before it closes; the full log is at `%TEMP%\ShowFinder-install.log`. |
+| The search ends with no shows | Your drive limit is probably too tight, or every deadline in range has passed. Open **Settings** and raise the drive time. |
+| The list of shows won't open | The picker needs the `windows-curses` package, which the installer adds automatically. Everything else — searching, reports, the CSV — works without it, and the list prints as plain text instead. Re-run **Install** to add it. |
+| The list is cut off at the right | Maximise the window, or drag it wider. The launcher asks for a 150-column window; some terminals ignore that. |
+| Antivirus blocks the installer | It is a plain text script — you or your IT can read `Install.cmd` and `windows\install.ps1` in Notepad before allowing it. |
+
+Whatever happens, `%TEMP%\ShowFinder-install.log` records every step and
+is safe to send to whoever set this up for you. It contains no passwords.
+
+## If you are the one distributing this
+
+**Send people the GitHub ZIP link or a Release, never a ZIP you made of
+your own folder.** Your working copy contains `.env` (your FestivalNet
+password), `vendor_profile.json` (your address and tax ID), and
+`business.json` (your costs). Those three are excluded from git, so a
+GitHub download is clean — a hand-made ZIP of your folder would mail
+another business your credentials.
+
+---
+
+## Quick start (Mac, Linux, or from a terminal)
 
 ```bash
 pip install -r requirements.txt
+python -m fnscraper setup      # configure it for your business
 python -m fnscraper best
 ```
 
-That one command is the whole job: it finds the best shows to book for
+That last command is the whole job: it finds the best shows to book for
 every weekend of the next three months and writes them to a CSV. Read on
 for what it does and how to tune it.
 
@@ -89,7 +258,14 @@ spec can never drift from the data.
 
 ### Before your first run
 
-Put your FestivalNet Pro credentials in a `.env` file at the project root:
+Run `python -m fnscraper setup` once. It asks for your home base, prices,
+costs, travel limits, and FestivalNet login, and writes them to
+`business.json`, `.env`, and `vendor_profile.json` — the same wizard the
+Windows installer runs. (Windows users never need to do this by hand; see
+[Install it on a Windows PC](#install-it-on-a-windows-pc).)
+
+Credentials can also be placed in a `.env` file at the project root by
+hand:
 
 ```
 FESTIVALNET_USER=your-username
@@ -276,7 +452,14 @@ top N per weekend are reported.
 
 Every constant — gas price, mpg, average sale, capture rate, fee tiers,
 category weights — lives in [`fnscraper/config.py`](fnscraper/config.py) so
-you can tune the model as your real sales numbers come in.
+you can tune the model as your real sales numbers come in. Those are the
+*defaults*; anything in `business.json` overrides them at startup, so per
+business tuning never means editing Python. Raw constants can be set there
+too, under `advanced`:
+
+```json
+{ "advanced": { "CAPTURE_RATE": 0.012, "MAX_DAILY_TRANSACTIONS": 200 } }
+```
 
 ### Booth fees, deadlines, and promoter contacts
 
@@ -352,9 +535,9 @@ Any of the three export formats imports losslessly. For each show it:
    penalizing permits, sponsorships, volunteer forms), downloading
    matching PDFs/DOCs and recording online forms (Jotform, Google Forms,
    Zapplication, Eventeny, …).
-3. **Auto-fills fillable PDFs** from your `vendor_profile.json` (copy
-   `vendor_profile.example.json`, fill in your business info) using fuzzy
-   field matching — "Business Name", "Company", "biz_name" all map
+3. **Auto-fills fillable PDFs** from your `vendor_profile.json` (written
+   by `python -m fnscraper setup`; `vendor_profile.example.json` shows the
+   fields) using fuzzy field matching — "Business Name", "Company", "biz_name" all map
    correctly. Flat/scanned PDFs and online forms get an `ANSWERS.md`
    copy-paste sheet instead.
 
