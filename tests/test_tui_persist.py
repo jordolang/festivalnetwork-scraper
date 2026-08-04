@@ -64,6 +64,25 @@ def test_deadline_column_and_deadline_order(monkeypatch):
     assert "Jul 20" in format_row(soon, checked=False)
 
 
+def test_missed_deadline_order_and_display(monkeypatch):
+    monkeypatch.setattr("fnscraper.tui.date", type("FixedDate", (date,), {
+        "today": classmethod(lambda cls: cls(2026, 7, 11))
+    }))
+    missed_later = scored(event_id="missed-later", deadlines="Apply by 07/10/2026")
+    open_event = scored(event_id="open", deadlines="Apply by 07/20/2026")
+    unknown = scored(event_id="unknown", deadlines="until full")
+    missed_earlier = scored(event_id="missed-earlier", deadlines="Apply by 07/01/2026")
+
+    rows = sort_for_picker(
+        [open_event, missed_later, unknown, missed_earlier], order="missed"
+    )
+
+    assert [r.event.event_id for r in rows] == [
+        "missed-earlier", "missed-later", "open", "unknown"
+    ]
+    assert "Jul 01" in format_row(missed_earlier, checked=False)
+
+
 def test_filter_by_open_deadline():
     expired = scored(event_id="expired", deadlines="Apply by 07/01/2026")
     included = scored(event_id="included", deadlines="Apply by July 20, 2026")

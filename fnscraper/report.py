@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path
 
+from . import config
 from .models import ScoredEvent
 
 
@@ -35,7 +36,7 @@ def write_weekend_report(
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / "weekend_picks.md"
     lines = [
-        "# Best salsa-vendor events by weekend",
+        f"# Best events by weekend for {config.BUSINESS_NAME}",
         "",
         f"Ranked by estimated **profit x sqrt(profit per $1 out of pocket)** — ",
         f"biggest return for the least cash risked, within {max_drive_hours:.0f} h "
@@ -97,12 +98,12 @@ def write_shortlist(selected: list[ScoredEvent], out_dir: Path) -> Path:
             f"- **When:** {when}  ({e.hours_text or 'hours n/a'})",
             f"- **Where:** {e.address or f'{e.city}, {e.state}'}"
             f"  ({e.drive_hours or 0:.1f} h drive)",
-            f"- **Cost to sell one jar:** {cpj}"
+            f"- **Cost to sell one {config.UNIT_NAME}:** {cpj}"
             f"  |  show cost: {_fmt_money(b.total_cost)}"
             f"  (booth {_fmt_money(b.booth_fee)}"
             f"{'~' if b.booth_fee_estimated else ''}, fuel {_fmt_money(b.fuel_cost)},"
             f" lodging {_fmt_money(b.lodging_cost)}, meals {_fmt_money(b.meals_cost)})",
-            f"- **Estimated:** {b.jars_sold:,.0f} jars, "
+            f"- **Estimated:** {b.jars_sold:,.0f} {config.UNIT_NAME}s, "
             f"{_fmt_money(b.est_profit)} profit ({b.roi:.1f}x)",
             f"- **Apply:** {e.deadlines or 'see listing'}  |  {e.url}",
             "",

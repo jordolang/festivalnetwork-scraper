@@ -18,24 +18,30 @@ log = logging.getLogger(__name__)
 PROFILE_FILE = "vendor_profile.json"
 PROFILE_EXAMPLE = "vendor_profile.example.json"
 
+# Placeholders only.  This template is what gets written into a PDF when
+# the owner has not run the setup wizard, and it ships in the public repo,
+# so it must never carry one business's real contact details, tax ID, or
+# insurance carrier — the next business to install would mail those out on
+# its own applications.  `python -m fnscraper setup` writes the real
+# values into the (gitignored) vendor_profile.json.
 DEFAULT_PROFILE = {
-    "business_name": "Your Salsa Company LLC",
-    "contact_name": "First Last",
-    "address": "123 Main St",
-    "city": "Zanesville",
+    "business_name": "YOUR BUSINESS NAME",
+    "contact_name": "YOUR NAME",
+    "address": "YOUR STREET ADDRESS",
+    "city": "YOUR CITY",
     "state": "OH",
-    "zip": "43701",
-    "phone": "(740) 555-0100",
+    "zip": "00000",
+    "phone": "(000) 000-0000",
     "email": "you@example.com",
-    "website": "https://example.com",
-    "product_description": "Small-batch gourmet salsa, sold in sealed retail jars.",
-    "category": "Packaged food / gourmet food product",
+    "website": "https://www.example.com",
+    "product_description": "WHAT YOU SELL",
+    "category": "YOUR VENDOR CATEGORY",
     "booth_size": "10x10",
     "electric_needed": "No",
-    "years_in_business": "5",
-    "tax_id": "",
-    "vendors_license": "",
-    "insurance_carrier": "",
+    "years_in_business": "1",
+    "tax_id": "YOUR TAX ID",
+    "vendors_license": "None",
+    "insurance_carrier": "YOUR INSURANCE CARRIER",
     "signature_date": "",
 }
 

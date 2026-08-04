@@ -12,3 +12,12 @@ vendor_profile.json
 # Downloaded/filled applications carry personal data; remove this line
 # if you want them committed.
 applications/
+
+# Written by the setup wizard - one business's own numbers.
+business.json
+# Launchers the Windows installer generates in the install folder.
+/*.bat
+windows/*.log
+
+# macOS folder metadata - never wanted in the Windows download.
+.DS_Store
