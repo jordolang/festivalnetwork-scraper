@@ -26,9 +26,14 @@ configure by hand.**
 
 ## 1. Download it
 
-Open [the project page on GitHub](https://github.com/jordolang/festivalnetwork-scraper),
-click the green **Code** button, then click **Download ZIP**. It lands in
-your **Downloads** folder.
+**[Click here to download it](https://github.com/jordolang/festivalnetwork-scraper/archive/refs/heads/main.zip)**
+— it lands in your **Downloads** folder as
+`festivalnetwork-scraper-main.zip`.
+
+> Use that link rather than the green **Code → Download ZIP** button on
+> the repository page. That button always downloads the repository's
+> *default* branch, which is not `main` here, and the installer only
+> exists on `main`.
 
 ## 2. Unzip it
 
