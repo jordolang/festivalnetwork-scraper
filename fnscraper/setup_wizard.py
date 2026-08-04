@@ -175,14 +175,14 @@ def _interview(root: Path, saved: dict) -> dict:
     data: dict = {"advanced": saved.get("advanced", {})}
 
     # -- who you are ------------------------------------------------------
-    section("1 of 6 - Your business")
+    section("1 of 7 - Your business")
     name = ask("What is your business called?",
                _get(saved, "business_name", ""), allow_blank=False)
     data["business_name"] = name
 
     # -- where you start from --------------------------------------------
     section(
-        "2 of 6 - Where you drive from",
+        "2 of 7 - Where you drive from",
         "Every show's distance, fuel cost, and hotel need is measured from\n"
         "here, so get the ZIP code right.",
     )
@@ -201,7 +201,7 @@ def _interview(root: Path, saved: dict) -> dict:
 
     # -- how far you will go ---------------------------------------------
     section(
-        "3 of 6 - How far you will travel",
+        "3 of 7 - How far you will travel",
         "Shows farther than this are ignored completely. Driving more than\n"
         "2.5 hours adds a hotel night to the cost of a show.",
     )
@@ -226,7 +226,7 @@ def _interview(root: Path, saved: dict) -> dict:
 
     # -- what you sell ----------------------------------------------------
     section(
-        "4 of 6 - What you sell",
+        "4 of 7 - What you sell",
         "This is how the tool estimates whether a show makes money.\n"
         "Give it your normal retail prices - round numbers are fine.",
     )
@@ -294,7 +294,7 @@ def _interview(root: Path, saved: dict) -> dict:
     data["product"] = product
 
     # -- what the road costs ----------------------------------------------
-    section("5 of 6 - What travel costs you",
+    section("5 of 7 - What travel costs you",
             "Used to work out fuel, hotel, and food for each show.")
     travel = {
         "mpg": ask_number(
@@ -315,22 +315,36 @@ def _interview(root: Path, saved: dict) -> dict:
             float(_get(saved, "travel.meals_per_day", config.MEALS_PER_DAY)),
             minimum=0, maximum=1000),
     }
-    travel["max_daytrip_hours"] = _get(saved, "travel.max_daytrip_hours",
-                                       config.MAX_DAYTRIP_HOURS)
+    travel["max_daytrip_hours"] = ask_number(
+        "How long a drive will you do there-and-back in one day, without\n"
+        "staying over? (longer drives add a hotel night to the cost)",
+        float(_get(saved, "travel.max_daytrip_hours", config.MAX_DAYTRIP_HOURS)),
+        minimum=0, maximum=12)
     data["travel"] = travel
 
+    # -- how far ahead to plan ---------------------------------------------
+    section(
+        "6 of 7 - How far ahead you book",
+        "Most promoters take applications months in advance, so this is\n"
+        "usually longer than you would think.",
+    )
     data["planning"] = {
-        "months_ahead": int(_get(saved, "planning.months_ahead",
-                                 config.BEST_MONTHS_AHEAD)),
-        "top_per_weekend": int(_get(saved, "planning.top_per_weekend",
-                                    config.BEST_TOP_PER_WEEKEND)),
+        "months_ahead": int(ask_number(
+            "How many months ahead should it plan?",
+            float(_get(saved, "planning.months_ahead", config.BEST_MONTHS_AHEAD)),
+            minimum=1, maximum=24, integer=True)),
+        "top_per_weekend": int(ask_number(
+            "How many shows do you want to choose between each weekend?",
+            float(_get(saved, "planning.top_per_weekend",
+                       config.BEST_TOP_PER_WEEKEND)),
+            minimum=1, maximum=50, integer=True)),
         "parallel_fetches": int(_get(saved, "planning.parallel_fetches",
                                      config.DEFAULT_JOBS)),
     }
 
     # -- logins and application details ------------------------------------
     section(
-        "6 of 6 - FestivalNet login and your application details",
+        "7 of 7 - FestivalNet login and your application details",
         "A FestivalNet Pro account is optional but makes a big difference:\n"
         "with one, the tool reads real booth fees, application deadlines,\n"
         "and promoter emails instead of estimating them.",
@@ -407,7 +421,11 @@ def _ask_profile(root: Path, business_name: str, home: dict,
 
     def field(key: str, question: str, default: str = "") -> str:
         current = str(profile.get(key, "") or "")
-        if current.isupper() and " " in current:     # placeholder text
+        # Compare against the shipped template rather than guessing at what
+        # looks like filler: "YOUR NAME" is obvious, but "00000" and
+        # "you@example.com" are placeholders too, and offering those as the
+        # suggested answer is how a bogus ZIP ends up on an application.
+        if current == str(pdf_fill.DEFAULT_PROFILE.get(key, "")):
             current = ""
         return ask(question, current or default)
 
@@ -464,6 +482,10 @@ def _finish(root: Path, data: dict) -> int:
               f"${product['deal_price']:,.2f}")
     print(f"  Vehicle         {data['travel']['mpg']:g} mpg at "
           f"${data['travel']['gas_price']:,.2f}/gal")
+    print(f"  Hotel needed    over {data['travel']['max_daytrip_hours']:g} "
+          f"hours each way, at ${data['travel']['lodging_per_night']:,.0f}/night")
+    print(f"  Plans           {data['planning']['months_ahead']} months ahead, "
+          f"{data['planning']['top_per_weekend']} shows a weekend")
     # Read the file as well as the answers: keeping an existing login is
     # the common case, and it must not be summarised as "no login".
     login = (env_updates.get(config.ENV_USERNAME)

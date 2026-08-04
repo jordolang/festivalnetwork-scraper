@@ -88,11 +88,16 @@ estimates are fine; you can change any of it later.
 | **Gas price** | Per gallon | `4.00` |
 | **Hotel per night** | Only charged when the drive is over 2½ hours | `150` |
 | **Food per day** | On the road | `35` |
+| **When a hotel is needed** | The longest drive you'll do there-and-back in one day. Anything longer adds a hotel night to that show's cost | `2.5` hours |
+| **How many months ahead to plan** | Promoters take applications well in advance, so this is usually longer than you'd think | `6` months |
+| **Shows per weekend** | How many options you want to choose between for each weekend | `10` |
 | **FestivalNet Pro login** *(optional)* | With one, it reads **real booth fees, application deadlines, and promoter emails** instead of estimating them. This is worth more than every other setting combined — see [Booth fees, deadlines, and promoter contacts](#booth-fees-deadlines-and-promoter-contacts) | your login |
 | **Your application details** | Name, address, phone, email, tax ID, booth size, insurance — these get typed into vendor applications for you | — |
 
 Nothing is saved until you confirm at the end, and the wizard shows you a
-summary first.
+summary first. **You never edit a configuration file** — every number the
+tool uses comes from these answers, and the same wizard reopens from the
+**Settings** icon whenever anything changes.
 
 ## 5. Use it
 
