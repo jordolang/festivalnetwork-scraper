@@ -12,6 +12,7 @@ Keys:
     SPACE                           check/uncheck the show next to the cursor
     o                               toggle event-date/deadline ordering
     m                               put missed deadlines first
+    c                               choose which categories to show
     d                               open the event-detail popup for the row
     ENTER or s                      save checked shows and exit
     q or ESC                        exit without saving
@@ -28,7 +29,7 @@ import textwrap
 from datetime import date, datetime
 from typing import NamedTuple
 
-from . import config
+from . import categories, config
 from .models import ScoredEvent
 
 def unit_label() -> str:
@@ -37,7 +38,8 @@ def unit_label() -> str:
 
 
 HELP_LINE = (
-    "SPACE select   o event/deadline   m missed first   d details   ENTER save+exit   "
+    "SPACE select   o event/deadline   m missed   c categories   d details   "
+    "ENTER save+exit   "
     "q quit without saving   up/down scroll"
 )
 HEADER_FMT = "    {st:2}  {deadline:11}  {date:11}  {cpj:>9}  {booth:>8}  {cost:>9}  {drive:>6}  {name}"
@@ -364,13 +366,75 @@ def _detail_modal(stdscr, s: ScoredEvent) -> None:
             return
 
 
+def _draw_category_modal(stdscr, present: list[tuple[str, str, int]],
+                         active: set[str], cursor: int) -> None:
+    height, width = stdscr.getmaxyx()
+    title = " Show which categories? "
+    rows = [
+        f"{'[x]' if key in active else '[ ]'} {label}  ({count})"
+        for key, label, count in present
+    ]
+    hint = "SPACE toggle   a all/none   ENTER apply   q/ESC cancel"
+    box_w = min(max(len(title), len(hint), *(len(r) for r in rows)) + 4,
+                width - 2)
+    box_h = min(len(rows) + 4, height - 2)
+    box_y = (height - box_h) // 2
+    box_x = (width - box_w) // 2
+
+    win = curses.newwin(box_h, box_w, box_y, box_x)
+    win.erase()
+    win.box()
+    win.addnstr(0, 2, title, box_w - 4, curses.A_BOLD)
+    for i, line in enumerate(rows):
+        if 1 + i >= box_h - 2:
+            break
+        attr = curses.A_REVERSE if i == cursor else curses.A_NORMAL
+        win.addnstr(1 + i, 2, line.ljust(box_w - 4), box_w - 4, attr)
+    win.addnstr(box_h - 1, 2, hint[: box_w - 4], box_w - 4, curses.A_DIM)
+    win.refresh()
+
+
+def _category_modal(stdscr, scored: list[ScoredEvent],
+                    active: set[str]) -> set[str] | None:
+    """Let the user check/uncheck categories present in the results.
+
+    Returns the new set of active category keys, or ``None`` if cancelled.
+    Always leaves at least one category active so the list can't go empty.
+    """
+    present = categories.present_categories(scored)
+    if not present:
+        return None
+    working = set(active)
+    cursor = 0
+    while True:
+        _draw_category_modal(stdscr, present, working, cursor)
+        key = stdscr.getch()
+        if key in (curses.KEY_UP, ord("k")):
+            cursor = max(0, cursor - 1)
+        elif key in (curses.KEY_DOWN, ord("j")):
+            cursor = min(len(present) - 1, cursor + 1)
+        elif key == ord(" "):
+            cat_key = present[cursor][0]
+            working.symmetric_difference_update({cat_key})
+        elif key == ord("a"):
+            all_keys = {k for k, _, _ in present}
+            working = set() if working >= all_keys else all_keys
+        elif key in (curses.KEY_ENTER, 10, 13):
+            if not working:                       # never apply an empty filter
+                working = {k for k, _, _ in present}
+            return working
+        elif key in (ord("q"), 27):
+            return None
+
+
 def _draw(stdscr, rows: list[ScoredEvent], checked: set[str],
-          cursor: int, top: int, order: str) -> None:
+          cursor: int, top: int, order: str, cat_summary: str = "") -> None:
     stdscr.erase()
     height, width = stdscr.getmaxyx()
     body_h = height - 3
 
-    title = f" FestivalNet picks — {len(rows)} shows, {len(checked)} selected — order: {order} "
+    title = (f" FestivalNet picks — {len(rows)} shows, {len(checked)} selected "
+             f"— order: {order}{cat_summary} ")
     stdscr.addnstr(0, 0, title.ljust(width - 1), width - 1, curses.A_BOLD)
     header = HEADER_FMT.format(
         st="ST", deadline="DEADLINE", date="DATE", cpj=f"$/{unit_label()}", booth="BOOTH $",
@@ -388,21 +452,46 @@ def _draw(stdscr, rows: list[ScoredEvent], checked: set[str],
     stdscr.refresh()
 
 
-def _picker(stdscr, rows: list[ScoredEvent]) -> list[ScoredEvent] | None:
+def _category_summary(active: set[str], present: list[tuple[str, str, int]]) -> str:
+    """Trailing title fragment describing the category filter, or ""."""
+    total = len(present)
+    if total <= 1 or len(active) >= total:
+        return ""
+    labels = [label for key, label, _ in present if key in active]
+    shown = ", ".join(labels[:3]) + ("…" if len(labels) > 3 else "")
+    return f" — categories: {shown}"
+
+
+def _picker(stdscr, scored: list[ScoredEvent]) -> list[ScoredEvent] | None:
     curses.curs_set(0)
     stdscr.keypad(True)
     checked: set[str] = set()
     cursor = top = 0
     order = "event"
 
+    # ``active`` holds the category keys currently visible.  It starts as
+    # everything present so the picker opens showing every scraped show;
+    # the ``c`` key narrows it.  ``rows`` is the sorted, category-filtered
+    # view — but selections are keyed by event id and saved from the full
+    # list, so checking a show then hiding its category never loses it.
+    present = categories.present_categories(scored)
+    active: set[str] = {key for key, _, _ in present}
+
+    def rebuild() -> list[ScoredEvent]:
+        return sort_for_picker(categories.filter_scored(scored, active), order)
+
+    rows = rebuild()
+
     while True:
         height, _ = stdscr.getmaxyx()
         body_h = max(1, height - 3)
+        cursor = max(0, min(cursor, len(rows) - 1)) if rows else 0
         if cursor < top:
             top = cursor
         elif cursor >= top + body_h:
             top = cursor - body_h + 1
-        _draw(stdscr, rows, checked, cursor, top, order)
+        _draw(stdscr, rows, checked, cursor, top, order,
+              _category_summary(active, present))
 
         key = stdscr.getch()
         if key in (curses.KEY_UP, ord("k")):
@@ -417,26 +506,39 @@ def _picker(stdscr, rows: list[ScoredEvent]) -> list[ScoredEvent] | None:
             cursor = 0
         elif key == curses.KEY_END:
             cursor = len(rows) - 1
-        elif key == ord(" "):
+        elif key == ord(" ") and rows:
             eid = rows[cursor].event.event_id
             checked.symmetric_difference_update({eid})
             cursor = min(len(rows) - 1, cursor + 1)   # advance to next show
-        elif key == ord("d"):
+        elif key == ord("d") and rows:
             _detail_modal(stdscr, rows[cursor])       # popup, then redraw list
         elif key == ord("o"):
-            current_id = rows[cursor].event.event_id
+            current_id = rows[cursor].event.event_id if rows else None
             order = "deadline" if order == "event" else "event"
-            rows[:] = sort_for_picker(rows, order)
-            cursor = next(i for i, s in enumerate(rows) if s.event.event_id == current_id)
+            rows = rebuild()
+            cursor = next((i for i, s in enumerate(rows)
+                           if s.event.event_id == current_id), 0)
             top = cursor
         elif key == ord("m"):
-            current_id = rows[cursor].event.event_id
+            current_id = rows[cursor].event.event_id if rows else None
             order = "event" if order == "missed" else "missed"
-            rows[:] = sort_for_picker(rows, order)
-            cursor = next(i for i, s in enumerate(rows) if s.event.event_id == current_id)
+            rows = rebuild()
+            cursor = next((i for i, s in enumerate(rows)
+                           if s.event.event_id == current_id), 0)
             top = cursor
+        elif key == ord("c"):
+            current_id = rows[cursor].event.event_id if rows else None
+            chosen = _category_modal(stdscr, scored, active)
+            if chosen is not None:
+                active = chosen
+                rows = rebuild()
+                cursor = next((i for i, s in enumerate(rows)
+                               if s.event.event_id == current_id), 0)
+                top = 0
         elif key in (curses.KEY_ENTER, 10, 13, ord("s")):
-            return [s for s in rows if s.event.event_id in checked]
+            # Save from the full list so a checked show hidden by the
+            # category filter is still exported.
+            return [s for s in scored if s.event.event_id in checked]
         elif key == ord("q"):
             # Bare ESC is deliberately not a quit key: arrow-key escape
             # sequences start with ESC and would trigger accidental exits
@@ -463,10 +565,11 @@ def run_picker(scored: list[ScoredEvent]) -> list[ScoredEvent] | None:
             "The interactive show picker needs the 'windows-curses' "
             "package. Install it with:  pip install windows-curses"
         )
-    rows = sort_for_picker(scored)
-    if not rows:
+    # Sorting happens inside _picker now, which re-sorts on every category
+    # change; the full list has to reach it so hidden shows stay selectable.
+    if not scored:
         return []
-    return curses.wrapper(_picker, rows)
+    return curses.wrapper(_picker, list(scored))
 
 
 def print_plain_list(scored: list[ScoredEvent]) -> None:

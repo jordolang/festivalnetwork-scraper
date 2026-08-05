@@ -333,7 +333,9 @@ of doing the show, drive time, location, date, and name:
 ```
 
 Keys: **SPACE** checks/unchecks the show next to the cursor (arrow keys /
-PgUp / PgDn scroll), **ENTER** saves your picks and exits, `q` quits
+PgUp / PgDn scroll), `c` opens a **category filter** (check/uncheck Arts,
+Crafts, Festivals, Expos, …), `o` toggles date/deadline ordering, `d` shows
+the full detail popup, **ENTER** saves your picks and exits, `q` quits
 without saving. Reopen the same list later without re-scraping:
 
 ```bash
@@ -367,6 +369,10 @@ python -m fnscraper --refresh                   # ignore the page cache
 python -m fnscraper --no-pick                   # skip the picker, print the list
 python -m fnscraper --browse                    # instant: reopen last results, no network
 python -m fnscraper --deadline-by 2026-08-01    # applications due by this date
+python -m fnscraper --categories arts crafts festival home-garden  # just these kinds
+python -m fnscraper --include-fairs             # add fairs back in
+python -m fnscraper --all-categories            # everything, fairs included
+python -m fnscraper --list-categories           # print the category keys
 ```
 
 ### Loading results quickly
@@ -384,6 +390,30 @@ Two things make repeat use fast:
 
 Pages are also cached on disk for ~20 hours, so even without `--browse` a second
 run within the day mostly reuses the cache and skips the network entirely.
+
+## Categories: no fairs by default
+
+The vendor here works packaged salsa, so the target is **arts & crafts
+festivals and expos** — not carnival-and-rides county/state fairs. By
+default the crawl **skips fairs entirely** (they're dropped before any
+geocoding or detail-fetch, so they never cost a request), keeping every
+other category.
+
+Pick exactly what you want in two places:
+
+- **Command line** — `--categories arts crafts festival home-garden` limits
+  the scrape; `--include-fairs` adds fairs back; `--all-categories` keeps
+  everything; `--list-categories` prints the keys (`arts`, `crafts`,
+  `food`, `farmers-market`, `music`, `holiday`, `home-garden`, `fair`,
+  `festival`, `other`).
+- **In the picker** — press `c` for a checkbox list of the categories in
+  your results and toggle them on/off live. Selections you've already
+  checked are kept even if you later hide their category, so filtering the
+  view never drops a show from your export.
+
+Categories are derived from FestivalNet's own URL slugs (`/Art-Shows/`,
+`/Craft-Shows/`, `/Fairs/`, …); the slug→category mapping lives in
+[`fnscraper/categories.py`](fnscraper/categories.py) if you want to tune it.
 
 ## The algorithm
 

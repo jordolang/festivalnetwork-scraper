@@ -12,6 +12,8 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import categories
+
 BASE_URL = "https://festivalnet.com"
 
 # Whose booth this is.  Overridden by business.json; the export directory
@@ -352,6 +354,10 @@ class Settings:
     # before business.json is applied, and would pin every install to the
     # shipped defaults.
     states: list[str] = field(default_factory=lambda: list(DEFAULT_STATES))
+    # Which vendor-facing categories to crawl.  ``None`` means "everything";
+    # the default drops fairs (see ``categories.default_selection``).
+    categories: set[str] | None = field(
+        default_factory=categories.default_selection)
     weeks_ahead: int = 8
     max_drive_hours: float = field(default_factory=lambda: MAX_DRIVE_HOURS)
     top_per_weekend: int = 5
