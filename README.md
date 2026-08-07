@@ -30,10 +30,8 @@ configure by hand.**
 — it lands in your **Downloads** folder as
 `festivalnetwork-scraper-main.zip`.
 
-> Use that link rather than the green **Code → Download ZIP** button on
-> the repository page. That button always downloads the repository's
-> *default* branch, which is not `main` here, and the installer only
-> exists on `main`.
+> The green **Code → Download ZIP** button on the repository page gets
+> you the same thing — the link above just skips a step.
 
 ## 2. Unzip it
 
