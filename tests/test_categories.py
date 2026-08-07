@@ -120,3 +120,77 @@ def test_pipeline_category_filter_skips_fairs(monkeypatch):
     names = {s.event.name for s in scored}
     assert "Craft Fest" in names
     assert "State Fair" not in names
+
+
+# ---------------------------------------------------------------------------
+# `best` must filter the same way whether it crawls or replays a cache
+# ---------------------------------------------------------------------------
+
+def _weekend_event(event_id: str, slug: str, name: str):
+    """A show on a Saturday, near enough home to survive every other filter."""
+    return make_event(
+        event_id=event_id, name=name, url=f"https://festivalnet.com/{event_id}",
+        category_slug=slug,
+        start_date=date(2026, 7, 11), end_date=date(2026, 7, 11),
+    )
+
+
+def _plan_shows(tmp_path, monkeypatch, argv, today=date(2026, 7, 1)):
+    """Run `fnscraper best --cached` over a two-show cache; return the names."""
+    from fnscraper import cli, persist
+
+    monkeypatch.chdir(tmp_path)
+    scored = [
+        score_event(_weekend_event("1", "Craft-Shows", "Craft Market")),
+        score_event(_weekend_event("2", "Fairs", "County Fair")),
+    ]
+    persist.save_results(scored, tmp_path / "reports" / "results.json")
+
+    class _FixedDate(date):
+        @classmethod
+        def today(cls):
+            return today
+
+    monkeypatch.setattr("fnscraper.best.date", _FixedDate)
+    rc = cli.best_main(argv + ["--out", str(tmp_path / "export"), "--json"])
+    assert rc == 0, "best returned no plan"
+    return rc
+
+
+def test_cached_plan_excludes_fairs_like_a_fresh_crawl(tmp_path, monkeypatch, capsys):
+    """A cached plan skips the pipeline, where the category filter lives.
+
+    Without an explicit filter on that path, `best` dropped fairs and
+    `best --cached` kept them - the same command disagreeing with itself
+    depending on whether it had to hit the network.
+    """
+    _plan_shows(tmp_path, monkeypatch, ["--cached"])
+    capsys.readouterr()
+    assert "County Fair" not in _exported(tmp_path)
+    assert "Craft Market" in _exported(tmp_path)
+
+
+def test_include_fairs_puts_them_back_on_a_cached_plan(tmp_path, monkeypatch, capsys):
+    _plan_shows(tmp_path, monkeypatch, ["--cached", "--include-fairs"])
+    capsys.readouterr()
+    assert "County Fair" in _exported(tmp_path)
+
+
+def _exported(tmp_path) -> str:
+    """Everything the export wrote, as one string."""
+    return "\n".join(
+        p.read_text(encoding="utf-8-sig")
+        for p in (tmp_path / "export").rglob("*.csv")
+    )
+
+
+def test_best_and_scrape_offer_the_same_category_flags():
+    """The two parsers share one definition, so they cannot drift apart."""
+    from fnscraper import cli
+
+    def flags(parser):
+        return {a for action in parser._actions for a in action.option_strings
+                if "categor" in a or "fair" in a}
+
+    assert flags(cli.build_best_parser()) == flags(cli.build_parser())
+    assert "--include-fairs" in flags(cli.build_best_parser())

@@ -15,6 +15,33 @@ from . import (
 from .http import Fetcher
 
 
+def add_category_flags(p: argparse.ArgumentParser) -> None:
+    """Category selection flags, shared by the scrape and by ``best``.
+
+    Defined once because the two commands filtering differently is a bug
+    the user cannot see: `best` quietly dropped fairs with no flag to put
+    them back, while the scrape had four.
+    """
+    cat_keys = ", ".join(c.key for c in categories.CATEGORIES)
+    p.add_argument("--categories", nargs="*", default=None, metavar="CAT",
+                   help="Only include these categories (default: everything "
+                        f"except fairs). Choices: {cat_keys}. "
+                        "See --list-categories.")
+    p.add_argument("--include-fairs", action="store_true",
+                   help="Add fairs back in (they are excluded by default)")
+    p.add_argument("--all-categories", action="store_true",
+                   help="Include every category, fairs included")
+    p.add_argument("--list-categories", action="store_true",
+                   help="List selectable category keys and exit")
+
+
+def print_categories() -> None:
+    print("Categories you can pass to --categories:")
+    for c in categories.CATEGORIES:
+        default = "" if c.key in categories.default_selection() else "  (off by default)"
+        print(f"  {c.key:16}{c.label}{default}")
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="fnscraper",
@@ -34,17 +61,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--states", nargs="*", default=None, metavar="STATE",
                    help="State page slugs to crawl (default: all states "
                         "within reach, e.g. Ohio West-Virginia)")
-    cat_keys = ", ".join(c.key for c in categories.CATEGORIES)
-    p.add_argument("--categories", nargs="*", default=None, metavar="CAT",
-                   help="Only include these categories (default: everything "
-                        f"except fairs). Choices: {cat_keys}. "
-                        "See --list-categories.")
-    p.add_argument("--include-fairs", action="store_true",
-                   help="Add fairs back in (they are excluded by default)")
-    p.add_argument("--all-categories", action="store_true",
-                   help="Include every category, fairs included")
-    p.add_argument("--list-categories", action="store_true",
-                   help="List selectable category keys and exit")
+    add_category_flags(p)
     p.add_argument("--max-drive-hours", type=float, default=config.MAX_DRIVE_HOURS,
                    help="One-way drive-time limit (default: 10)")
     p.add_argument("--top", type=int, default=5,
@@ -120,6 +137,7 @@ def build_best_parser() -> argparse.ArgumentParser:
     p.add_argument("--max-drive-hours", type=float, default=config.MAX_DRIVE_HOURS,
                    help="One-way drive-time limit (default: 10)")
     p.add_argument("--states", nargs="*", default=None, metavar="STATE")
+    add_category_flags(p)
     p.add_argument("--cached", action="store_true",
                    help="Plan from the last scrape's saved results instead of "
                         "hitting the network")
@@ -142,6 +160,11 @@ def best_main(argv: list[str]) -> int:
         stream=sys.stderr,
     )
 
+    if args.list_categories:
+        print_categories()
+        return 0
+    selected = resolve_categories(args)
+
     results_path = Path("reports") / "results.json"
     if args.cached:
         if not results_path.exists():
@@ -157,6 +180,14 @@ def best_main(argv: list[str]) -> int:
             for s in persist.load_results(results_path)
         ]
         scored.sort(key=lambda s: s.breakdown.score, reverse=True)
+        # The crawl filters by category inside the pipeline; a cached plan
+        # skips the pipeline entirely, so without this `best` and
+        # `best --cached` would disagree about whether fairs are in.
+        scored = categories.filter_scored(scored, selected)
+        if not scored:
+            print("Nothing left after the category filter; try "
+                  "--include-fairs or --all-categories.", file=sys.stderr)
+            return 1
     else:
         # Crawl a little past the horizon so the last weekend is fully covered.
         settings = config.Settings.from_env(
@@ -167,6 +198,7 @@ def best_main(argv: list[str]) -> int:
         )
         if args.states:
             settings.states = args.states
+        settings.categories = selected
         scored = pipeline.run(settings)
         if not scored:
             print("No qualifying events found.", file=sys.stderr)
@@ -297,10 +329,7 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     if args.list_categories:
-        print("Categories you can pass to --categories:")
-        for c in categories.CATEGORIES:
-            default = "" if c.key in categories.default_selection() else "  (off by default)"
-            print(f"  {c.key:16}{c.label}{default}")
+        print_categories()
         return 0
 
     settings = config.Settings.from_env(

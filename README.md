@@ -238,6 +238,8 @@ python -m fnscraper best --top 8                 # 8 shows a weekend instead of 
 python -m fnscraper best --max-drive-hours 5     # tighter radius
 python -m fnscraper best --states Ohio Kentucky  # only these states
 python -m fnscraper best --max-repeats 1         # a recurring market gets one weekend
+python -m fnscraper best --include-fairs          # fairs are excluded by default
+python -m fnscraper best --categories crafts food # only these kinds of show
 python -m fnscraper best --refresh               # ignore the page cache, re-fetch all
 python -m fnscraper best --json                  # machine-readable summary on stdout
 python -m fnscraper best -j 8                    # more parallel fetches (faster, less polite)
@@ -411,9 +413,19 @@ Pick exactly what you want in two places:
   checked are kept even if you later hide their category, so filtering the
   view never drops a show from your export.
 
+`fnscraper best` takes the same four flags and applies them identically
+whether it crawls fresh or replays a cache with `--cached`, so the booking
+plan can never disagree with itself about what counts as a show worth
+booking.
+
 Categories are derived from FestivalNet's own URL slugs (`/Art-Shows/`,
 `/Craft-Shows/`, `/Fairs/`, …); the slug→category mapping lives in
 [`fnscraper/categories.py`](fnscraper/categories.py) if you want to tune it.
+
+One consequence worth knowing: the crawl drops unselected categories
+*before* saving `reports/results.json`, so `--include-fairs` on a later
+`--cached` run can only surface fairs that were in range when the crawl
+ran. Re-crawl with `--all-categories` if you want everything on disk.
 
 ## The algorithm
 
