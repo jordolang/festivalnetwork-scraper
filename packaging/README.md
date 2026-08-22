@@ -71,6 +71,14 @@ tag in the **release_tag** box (e.g. `v1.0.0`). The tag is created at the
 commit you dispatch from, so it does not need to exist first. Everything
 downstream is identical to a tag push.
 
+### `hdiutil: create failed - Resource busy`
+
+macOS's disk-image helper can still hold the device when `hdiutil create`
+attaches the image it is building, and the build fails on a tree that is
+perfectly good. It clears within seconds, so `make_dmg` retries a few
+times with a widening gap before giving up. Seen once in CI on a commit
+whose only change was a workflow input.
+
 ### Why there is no Intel macOS runner
 
 `macos-13` was the last Intel runner image and GitHub is winding it down;
