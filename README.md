@@ -39,7 +39,10 @@ and a one-click export.
 
 ### A prebuilt app
 
-Each release carries four builds. Take the one that matches your machine:
+Grab it from
+**[Releases](https://github.com/jordolang/festivalnetwork-scraper/releases)**.
+Each release carries a build per platform and architecture — take the one
+that matches your machine:
 
 | You have | Download | Runs on |
 |----------|----------|---------|
@@ -150,9 +153,19 @@ environment carries the slice you are asking for.
 
 `.github/workflows/desktop.yml` does all four on GitHub's runners —
 `windows-latest`, `windows-11-arm`, `macos-13` and `macos-14` — runs the
-test suite first, and attaches the zips to a draft release on a `v*` tag.
-The ARM64 Windows job is marked `continue-on-error`, so a repository
-without access to those runners still gets the other three.
+test suite first, and publishes the zips to a GitHub release on a `v*` tag:
+
+```bash
+git tag -a v1.2.3 -m "FestivalNet Scraper 1.2.3"
+git push origin v1.2.3
+```
+
+Two of the four jobs are marked `continue-on-error`, because their runners
+are not always obtainable: Windows ARM64 (not every repository has access)
+and macOS Intel (GitHub is winding those runners down, and they can sit
+queued indefinitely). The release step names any target that is missing
+rather than quietly shipping a short set, and refuses to publish a release
+with no downloads at all.
 
 ## Where it keeps things
 

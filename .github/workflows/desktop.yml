@@ -56,7 +56,11 @@ jobs:
           - label: macOS Intel
             runner: macos-13
             arch: x64
-            optional: false
+            # GitHub's Intel macOS runners are being wound down and queue for
+            # a long time or never start.  Optional, so one unavailable
+            # runner cannot hold a release hostage — the verify step below
+            # names whatever is missing rather than shipping it quietly.
+            optional: true
           - label: macOS Apple Silicon
             runner: macos-14
             arch: arm64
@@ -100,7 +104,7 @@ jobs:
           retention-days: 30
 
   release:
-    name: Attach to release
+    name: Publish release
     needs: build
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
@@ -111,10 +115,52 @@ jobs:
         with:
           path: artifacts
           merge-multiple: true
-      - name: List what will be published
-        run: ls -la artifacts
+
+      - name: Check which targets actually built
+        shell: bash
+        run: |
+          ls -la artifacts
+          missing=""
+          for target in windows-x64 windows-arm64 macos-x64 macos-arm64; do
+            if ls artifacts/*"$target".zip >/dev/null 2>&1; then
+              echo "present: $target"
+            else
+              echo "MISSING: $target"
+              missing="$missing $target"
+            fi
+          done
+          # A release with no downloads at all is worse than no release.
+          if ! ls artifacts/*.zip >/dev/null 2>&1; then
+            echo "::error::No build artifacts to publish."
+            exit 1
+          fi
+          if [ -n "$missing" ]; then
+            echo "::warning::Publishing without:$missing"
+          fi
+
       - uses: softprops/action-gh-release@v2
         with:
           files: artifacts/*.zip
-          draft: true
+          # Published, not drafted: a draft release is invisible on the
+          # Releases page, so the downloads would not actually reach anyone.
+          draft: false
+          fail_on_unmatched_files: true
           generate_release_notes: true
+          name: FestivalNet Scraper ${{ github.ref_name }}
+          body: |
+            Desktop builds of the FestivalNet Scraper. Download the one that
+            matches your machine, unzip it, and run **FestivalNet Scraper**.
+
+            | You have | Download |
+            |----------|----------|
+            | A Windows PC | `...-windows-x64.zip` |
+            | A Windows-on-ARM PC | `...-windows-arm64.zip` |
+            | A Mac with Apple silicon (M1-M4) | `...-macos-arm64.zip` |
+            | An Intel Mac (2020 or earlier) | `...-macos-x64.zip` |
+
+            Not sure which Mac: **Apple menu -> About This Mac**. On Windows:
+            **Settings -> System -> About -> System type**.
+
+            These builds are unsigned, so the first launch needs
+            **More info -> Run anyway** on Windows, or **right-click -> Open**
+            on macOS. Afterwards they open normally.

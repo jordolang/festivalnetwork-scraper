@@ -39,6 +39,34 @@ those from an x64 host, so the ARM64 Windows app comes off an ARM64 runner
 `--target` works there because the wheels and the interpreter can carry
 both slices at once.
 
+## Cutting a release
+
+Tag it and push the tag; the workflow does the rest.
+
+```bash
+git tag -a v1.0.0 -m "FestivalNet Scraper 1.0.0"
+git push origin v1.0.0
+```
+
+That runs the test suite, builds every target, and publishes a GitHub
+release with the zips attached. Keep the tag in step with
+`fnscraper.__version__`, since that is what names the artifacts.
+
+### When a Mac build is missing
+
+macOS Intel builds run on `macos-13`, the last Intel runner image, which
+GitHub is winding down — jobs against it can queue indefinitely. The job
+is therefore `continue-on-error`, and a release can go out without it; the
+workflow logs a warning naming what is absent.
+
+The durable fix is to stop needing an Intel runner at all: build one
+**universal2** app on Apple silicon that runs on both. PyInstaller's
+`--target universal2` (already wired to `build.py --target universal2`)
+needs a universal2 CPython, which `actions/setup-python` does not provide
+— it would have to come from the python.org installer. Every dependency
+here is pure Python, so nothing else stands in the way. Untested, hence
+not wired into CI yet.
+
 ## Signing and notarizing (optional)
 
 Unsigned builds work; they just make the OS ask the user once. To sign a
