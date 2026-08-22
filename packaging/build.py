@@ -25,6 +25,7 @@ import platform
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -134,7 +135,15 @@ def package(built: Path, arch: str) -> Path:
     return target
 
 
-def make_dmg(built: Path, arch: str) -> Path:
+# hdiutil attaches the image it is building, and macOS's diskimages helper
+# can still be holding the device from a previous operation when it does.
+# The result is `hdiutil: create failed - Resource busy` on a build that is
+# otherwise perfect.  It clears in seconds.
+DMG_ATTEMPTS = 4
+DMG_RETRY_SECONDS = 5
+
+
+def make_dmg(built: Path, arch: str, attempts: int = DMG_ATTEMPTS) -> Path:
     """A mountable image with the app and a drag-here Applications link."""
     dmg = artifact_name(arch, ".dmg")
     dmg.unlink(missing_ok=True)
@@ -146,9 +155,22 @@ def make_dmg(built: Path, arch: str) -> Path:
     # refuses to open the result.
     run(["cp", "-R", str(built), str(staging / built.name)])
     os.symlink("/Applications", staging / "Applications")
-    run(["hdiutil", "create", "-volname", APP_NAME, "-srcfolder", str(staging),
-         "-ov", "-format", "UDZO", str(dmg)])
-    return dmg
+
+    command = ["hdiutil", "create", "-volname", APP_NAME,
+               "-srcfolder", str(staging), "-ov", "-format", "UDZO", str(dmg)]
+    for attempt in range(1, attempts + 1):
+        try:
+            run(command)
+            return dmg
+        except subprocess.CalledProcessError:
+            if attempt == attempts:
+                # Out of patience: this is no longer a busy device.
+                raise
+            wait = DMG_RETRY_SECONDS * attempt
+            print(f"hdiutil failed (attempt {attempt}/{attempts}); "
+                  f"retrying in {wait}s", flush=True)
+            time.sleep(wait)
+    raise AssertionError("unreachable")          # pragma: no cover
 
 
 def main(argv: list[str] | None = None) -> int:

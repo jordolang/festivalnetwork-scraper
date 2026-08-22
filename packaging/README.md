@@ -55,8 +55,29 @@ git push origin v1.0.0
 ```
 
 That runs the test suite, builds every target, and publishes a GitHub
-release with the zips attached. Keep the tag in step with
-`fnscraper.__version__`, since that is what names the artifacts.
+release with the `.exe` and `.dmg` files attached. Keep the tag in step
+with `fnscraper.__version__`, since that is what names the artifacts.
+
+### If you cannot push a tag
+
+Some credentials are scoped to branches and refuse `refs/tags/*` — a
+tag push then fails with `HTTP 403` while branch pushes to the same
+remote keep working. Rather than hunting for a credential, dispatch the
+workflow and let it create the tag: `GITHUB_TOKEN` inside Actions always
+can.
+
+**Actions → Desktop builds → Run workflow**, pick the branch, and put the
+tag in the **release_tag** box (e.g. `v1.0.0`). The tag is created at the
+commit you dispatch from, so it does not need to exist first. Everything
+downstream is identical to a tag push.
+
+### `hdiutil: create failed - Resource busy`
+
+macOS's disk-image helper can still hold the device when `hdiutil create`
+attaches the image it is building, and the build fails on a tree that is
+perfectly good. It clears within seconds, so `make_dmg` retries a few
+times with a widening gap before giving up. Seen once in CI on a commit
+whose only change was a workflow input.
 
 ### Why there is no Intel macOS runner
 
