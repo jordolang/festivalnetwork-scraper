@@ -17,6 +17,17 @@ from fnscraper.gui import viewmodel as vm            # noqa: E402
 from fnscraper.gui.detail import TABS as DETAIL_TABS  # noqa: E402
 
 
+def test_the_packaged_app_selftest_passes_here():
+    """The check CI runs against the frozen build, run against the source.
+
+    Needs no display: it is the import graph and the bundled assets that
+    packaging breaks, and both are checkable headless.
+    """
+    from fnscraper import gui
+
+    assert gui.selftest() == 0
+
+
 @pytest.fixture(scope="module")
 def display_available() -> bool:
     try:
@@ -209,6 +220,31 @@ def test_the_rail_settings_become_a_crawl_the_pipeline_can_run(window):
     assert settings.categories == {"crafts"}
     assert settings.jobs == 3
     assert settings.max_pages_per_state == 1
+
+
+def test_the_status_bar_prints_counters_including_a_reset_to_zero(window):
+    window._show_counters({"requests": 4_892, "failures": 3})
+    window.update()
+    assert window.request_label.cget("text") == "Requests: 4,892"
+    assert window.failed_label.cget("text") == "Failed: 3"
+    # A new crawl has to clear the last one's totals, not keep reporting them.
+    window._show_counters({})
+    window.update()
+    assert window.request_label.cget("text") == "Requests: 0"
+    assert window.failed_label.cget("text") == "Failed: 0"
+
+
+def test_a_progress_event_moves_the_counters(window):
+    from fnscraper.gui import scrape
+
+    window._on_scrape_event(scrape.PROGRESS, scrape.Progress(
+        stage="crawl", done=3, total=25, message="Ohio: 412 listings so far",
+        requests=137, failures=2,
+    ))
+    window.update()
+    assert window.request_label.cget("text") == "Requests: 137"
+    assert window.failed_label.cget("text") == "Failed: 2"
+    assert "Crawling listings 3/25" in window.status.cget("text")
 
 
 def test_stop_is_only_offered_while_a_crawl_is_running(window):

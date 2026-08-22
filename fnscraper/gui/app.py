@@ -724,6 +724,8 @@ class ScraperWindow(tk.Tk):
         self.sample_badge.configure(text="")
         self.set_status(f"Crawling {len(settings.states)} state listing(s)…",
                         t.FG)
+        self._show_counters({})
+        self.time_label.configure(text="Total Time: 00:00:00")
         self._draw_progress(0.0)
 
     def _stop_scrape(self):
@@ -738,6 +740,11 @@ class ScraperWindow(tk.Tk):
         if self.controller.running:
             self.time_label.configure(
                 text=f"Total Time: {scrape.format_elapsed(self.controller.elapsed)}")
+            # Read the counters straight off the Fetcher rather than
+            # waiting for the next progress event: the geocoding stage can
+            # go a minute between ticks, and a status bar frozen at the
+            # last count reads as a hung crawl.
+            self._show_counters(self.controller.stats())
         self.after(150, self._pump)
 
     def _on_scrape_event(self, kind: str, payload: Any):
@@ -748,7 +755,8 @@ class ScraperWindow(tk.Tk):
             counter = (f" {payload.done:,}/{payload.total:,}"
                        if payload.total else "")
             self.set_status(f"{label}{counter} — {payload.message}", t.FG)
-            self._update_counters(payload)
+            self._show_counters({"requests": payload.requests,
+                                 "failures": payload.failures})
         elif kind == scrape.FINISHED:
             self._finish_scrape(payload)
         elif kind == scrape.CANCELLED:
@@ -766,6 +774,7 @@ class ScraperWindow(tk.Tk):
         self._reset_buttons()
         self._draw_progress(1.0)
         self.set_results(scored, sample=False, source=payload.get("path"))
+        self._show_counters(payload.get("stats", {}))
         elapsed = scrape.format_elapsed(payload.get("elapsed", 0.0))
         if scored:
             self.set_status(
@@ -780,12 +789,18 @@ class ScraperWindow(tk.Tk):
         self.start_button.set_enabled(True)
         self.stop_button.set_enabled(False)
 
-    def _update_counters(self, progress: scrape.Progress):
-        if progress.requests:
-            self.request_label.configure(text=f"Requests: {progress.requests:,}")
-        if progress.failures:
-            self.failed_label.configure(text=f"Failed: {progress.failures:,}",
-                                        fg=t.RED)
+    def _show_counters(self, stats: dict):
+        """Paint the request counters — including back to zero.
+
+        Always written, never only-when-nonzero: a new crawl has to clear
+        the last one's totals, or the bar reports a run that already
+        finished.
+        """
+        requests = stats.get("requests", 0)
+        failures = stats.get("failures", 0)
+        self.request_label.configure(text=f"Requests: {requests:,}")
+        self.failed_label.configure(text=f"Failed: {failures:,}",
+                                    fg=t.RED if failures else t.FG_DIM)
 
     def _draw_progress(self, fraction: float):
         bar = self.progress_bar

@@ -80,9 +80,17 @@ jobs:
         run: python packaging/build.py
 
       - name: Verify the frozen app starts
-        # A frozen GUI app that cannot import its own modules still exits 0
-        # from a smoke import, so run the real entry point's import path.
-        run: python -c "import fnscraper.gui, sys; sys.exit(0 if fnscraper.gui.available() else 1)"
+        # The app that just got built, not the source tree it was built
+        # from: a missing hidden import or an icon left out of the bundle
+        # only shows up in the frozen copy, and importing the checkout
+        # would sail past both.
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            "dist/FestivalNet Scraper.app/Contents/MacOS/FestivalNet Scraper" --check
+          else
+            "dist/FestivalNet Scraper/FestivalNet Scraper.exe" --check
+          fi
 
       - uses: actions/upload-artifact@v4
         with:

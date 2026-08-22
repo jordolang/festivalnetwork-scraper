@@ -10,6 +10,11 @@ optional hooks the command line never passes:
     A :class:`threading.Event`.  When it is set the run stops at the next
     checkpoint and raises :class:`Cancelled` — half a crawl is never
     returned as if it were a whole one.
+``on_fetcher``
+    Handed the :class:`~fnscraper.http.Fetcher` as soon as it exists, so a
+    caller can read its live request counters while the run is going.  The
+    run builds its own Fetcher from ``settings``; this is the only way to
+    reach it without duplicating that construction.
 """
 
 from __future__ import annotations
@@ -107,6 +112,7 @@ def run(
     settings: config.Settings,
     progress: ProgressFn | None = None,
     cancel: threading.Event | None = None,
+    on_fetcher: Callable[[Fetcher], None] | None = None,
 ) -> list[ScoredEvent]:
     report = progress or _noop
     today = date.today()
@@ -120,6 +126,8 @@ def run(
         workers=jobs,
         max_retries=settings.max_retries,
     )
+    if on_fetcher is not None:
+        on_fetcher(fetcher)
     if settings.username and settings.password:
         report("login", 0, 1, "Signing in to FestivalNet…")
         fetcher.login(settings.username, settings.password)

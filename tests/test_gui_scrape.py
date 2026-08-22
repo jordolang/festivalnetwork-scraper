@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pathlib
 import threading
 from datetime import date, timedelta
 
@@ -173,9 +174,73 @@ def test_a_cancelled_run_raises_instead_of_returning_half_a_crawl(tmp_path):
         pipeline.run(settings, cancel=cancel)
 
 
+def test_run_hands_its_fetcher_back_so_counters_can_be_read_live(tmp_path):
+    """The status bar's counters live on the Fetcher pipeline.run builds."""
+    settings = config.Settings(
+        states=["Ohio"], cache_dir=str(tmp_path / "cache"),
+        geocode_cache=str(tmp_path / "geo.json"),
+    )
+    handed: list = []
+    cancel = threading.Event()
+    cancel.set()
+    with pytest.raises(pipeline.Cancelled):
+        pipeline.run(settings, cancel=cancel, on_fetcher=handed.append)
+    assert len(handed) == 1
+    assert handed[0].stats() == {"requests": 0, "cache_hits": 0, "failures": 0}
+
+
+def test_controller_counters_are_zero_before_a_crawl_starts():
+    controller = scrape.ScrapeController(lambda kind, payload: None)
+    assert controller.stats() == {"requests": 0, "cache_hits": 0, "failures": 0}
+
+
+def test_controller_reports_the_counters_of_the_running_crawl(tmp_path):
+    controller = scrape.ScrapeController(lambda kind, payload: None)
+    fetcher = make_fetcher(tmp_path, [FakeResponse(text="<p>hi</p>")])
+    controller._fetcher = fetcher
+    fetcher.get("https://example.test/a")
+    assert controller.stats()["requests"] == 1
+
+
+def test_progress_carries_the_counters_the_status_bar_prints():
+    progress = scrape.Progress(stage="crawl", done=2, total=10,
+                               requests=4_892, failures=3)
+    assert (progress.requests, progress.failures) == (4_892, 3)
+    assert progress.fraction == 0.2
+
+
 def test_progress_is_reported_with_a_stage_the_window_can_label():
     from fnscraper.gui.app import _STAGE_LABELS
     assert set(pipeline.STAGES) <= set(_STAGE_LABELS)
+
+
+def test_windows_curses_is_not_requested_on_arm64():
+    """It publishes no ARM64 wheel; asking fails the whole install.
+
+    This is not hypothetical tidiness — it is what turned the Windows
+    ARM64 build red, and it takes the CLI down with it, since pip aborts
+    the entire requirements file on one unsatisfiable line.
+    """
+    markers = pytest.importorskip("packaging.markers")
+    requirements = pytest.importorskip("packaging.requirements")
+
+    text = (pathlib.Path(__file__).resolve().parent.parent
+            / "requirements.txt").read_text(encoding="utf-8")
+    lines = [ln.strip() for ln in text.splitlines()
+             if ln.strip() and not ln.strip().startswith("#")]
+    curses_line = next(ln for ln in lines if ln.startswith("windows-curses"))
+    marker = requirements.Requirement(curses_line).marker
+    assert marker is not None
+
+    def wanted(platform_name: str, machine: str) -> bool:
+        return marker.evaluate({"sys_platform": platform_name,
+                                "platform_machine": machine})
+
+    assert wanted("win32", "AMD64") is True
+    assert wanted("win32", "ARM64") is False
+    assert wanted("darwin", "arm64") is False
+    assert wanted("linux", "x86_64") is False
+    assert markers is not None
 
 
 def test_declining_contact_details_clears_them():

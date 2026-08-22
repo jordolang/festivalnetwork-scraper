@@ -142,6 +142,10 @@ class ScrapeController:
         self._cancel = threading.Event()
         self._started_at = 0.0
         self.last_error: str | None = None
+        # The run builds its own Fetcher; it hands it back through
+        # pipeline.run's on_fetcher hook so the status bar can read the
+        # request counters as they climb.
+        self._fetcher = None
 
     # -- state ---------------------------------------------------------
     @property
@@ -152,6 +156,12 @@ class ScrapeController:
     def elapsed(self) -> float:
         return 0.0 if not self._started_at else time.monotonic() - self._started_at
 
+    def stats(self) -> dict[str, int]:
+        """Live request counters, zeroed before the first request goes out."""
+        if self._fetcher is None:
+            return {"requests": 0, "cache_hits": 0, "failures": 0}
+        return self._fetcher.stats()
+
     # -- control -------------------------------------------------------
     def start(self, settings: config.Settings,
               results_path: Path | None = None) -> bool:
@@ -160,6 +170,7 @@ class ScrapeController:
         self._cancel = threading.Event()
         self._started_at = time.monotonic()
         self.last_error = None
+        self._fetcher = None
         self._thread = threading.Thread(
             target=self._run, args=(settings, results_path),
             name="fnscraper-crawl", daemon=True,
@@ -181,13 +192,19 @@ class ScrapeController:
         from .. import persist, pipeline
 
         def report(stage: str, done: int, total: int, message: str):
+            counters = self.stats()
             self.queue.put((PROGRESS, Progress(
                 stage=stage, done=done, total=total, message=message,
                 elapsed=self.elapsed,
+                requests=counters["requests"], failures=counters["failures"],
             )))
 
+        def remember(fetcher):
+            self._fetcher = fetcher
+
         try:
-            scored = pipeline.run(settings, progress=report, cancel=self._cancel)
+            scored = pipeline.run(settings, progress=report,
+                                  cancel=self._cancel, on_fetcher=remember)
         except pipeline.Cancelled:
             self.queue.put((CANCELLED, None))
             return
@@ -206,7 +223,8 @@ class ScrapeController:
                     elapsed=self.elapsed,
                 )))
         self.queue.put((FINISHED, {"scored": scored, "path": saved,
-                                   "elapsed": self.elapsed}))
+                                   "elapsed": self.elapsed,
+                                   "stats": self.stats()}))
 
     # -- pumping -------------------------------------------------------
     def drain(self) -> None:
