@@ -1,11 +1,19 @@
 # Packaging the desktop app
 
-Four artifacts, one per platform/architecture pair:
+Four artifacts, one per platform/architecture pair, each in the shape that
+platform's users expect:
 
-    FestivalNet-Scraper-<version>-windows-x64.zip
-    FestivalNet-Scraper-<version>-windows-arm64.zip
-    FestivalNet-Scraper-<version>-macos-x64.zip
-    FestivalNet-Scraper-<version>-macos-arm64.zip
+    FestivalNet-Scraper-<version>-windows-x64.exe     one self-contained .exe
+    FestivalNet-Scraper-<version>-windows-arm64.exe
+    FestivalNet-Scraper-<version>-macos-x64.dmg       a mountable disk image
+    FestivalNet-Scraper-<version>-macos-arm64.dmg
+
+Windows gets a **one-file** build: everything is folded into the binary,
+which unpacks to a temp directory at launch.  That costs a second or two of
+startup and buys a single file you can hand someone, rather than a folder
+they have to keep intact.  macOS keeps the layered form, because a `.app`
+*is* a directory and cannot be a one-file binary; the `.dmg` wraps it with
+an Applications symlink to drag it into.
 
 ## Build one
 
@@ -13,8 +21,7 @@ Four artifacts, one per platform/architecture pair:
 pip install -r requirements-build.txt
 python packaging/build.py                 # this machine's platform + arch
 python packaging/build.py --target arm64  # macOS cross-build
-python packaging/build.py --dmg           # macOS: also roll a disk image
-python packaging/build.py --no-archive    # leave the app folder, skip the zip
+python packaging/build.py --no-package    # leave the raw build, skip naming
 ```
 
 Output lands in `dist/`. `build.py` regenerates the icons first if they are
@@ -76,13 +83,13 @@ identity before building, then notarize the zip:
 ```bash
 export FN_CODESIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)"
 python packaging/build.py
-xcrun notarytool submit dist/FestivalNet-Scraper-*-macos-*.zip \
+xcrun notarytool submit dist/FestivalNet-Scraper-*-macos-*.dmg \
     --apple-id you@example.com --team-id TEAMID --wait
-xcrun stapler staple "dist/FestivalNet Scraper.app"
+xcrun stapler staple dist/FestivalNet-Scraper-*-macos-*.dmg
 ```
 
-On Windows, sign the executable inside the app folder with `signtool` and
-re-zip.
+On Windows, sign with `signtool` — the one-file `.exe` is the whole
+deliverable, so there is nothing else to sign or repackage.
 
 ## Environment variables the spec reads
 

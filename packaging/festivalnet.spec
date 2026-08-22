@@ -49,12 +49,17 @@ analysis = Analysis(
 )
 pyz = PYZ(analysis.pure)
 
-exe = EXE(
-    pyz,
-    analysis.scripts,
-    [],
-    exclude_binaries=True,
-    name=APP_NAME if not IS_WINDOWS else "FestivalNet Scraper",
+# Each platform gets the shape its users expect to download.
+#
+# Windows: one self-contained .exe.  Everything is folded into the binary,
+# which unpacks to a temp directory at launch — a little slower to start
+# than a folder build, and the only form that is a *file* you can hand
+# someone rather than a directory they must keep intact.
+#
+# macOS: the layered form (EXE + COLLECT + BUNDLE), because a .app *is* a
+# directory and a one-file binary cannot be one.  build.py wraps it in the
+# .dmg that Mac users expect to mount.
+common = dict(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -68,15 +73,36 @@ exe = EXE(
     icon=icon,
 )
 
-collect = COLLECT(
-    exe,
-    analysis.binaries,
-    analysis.datas,
-    strip=False,
-    upx=False,
-    upx_exclude=[],
-    name=APP_NAME,
-)
+if IS_WINDOWS:
+    exe = EXE(
+        pyz,
+        analysis.scripts,
+        analysis.binaries,
+        analysis.datas,
+        [],
+        name=APP_NAME,
+        runtime_tmpdir=None,
+        **common,
+    )
+else:
+    exe = EXE(
+        pyz,
+        analysis.scripts,
+        [],
+        exclude_binaries=True,
+        name=APP_NAME,
+        **common,
+    )
+
+    collect = COLLECT(
+        exe,
+        analysis.binaries,
+        analysis.datas,
+        strip=False,
+        upx=False,
+        upx_exclude=[],
+        name=APP_NAME,
+    )
 
 if IS_MAC:
     app = BUNDLE(

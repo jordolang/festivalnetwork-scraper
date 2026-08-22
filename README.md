@@ -46,23 +46,23 @@ that matches your machine:
 
 | You have | Download | Runs on |
 |----------|----------|---------|
-| A PC | `FestivalNet-Scraper-<version>-windows-x64.zip` | Windows 10/11, Intel or AMD |
-| A Windows-on-ARM PC (Surface Pro X, Snapdragon laptops) | `…-windows-arm64.zip` | Windows 11 on ARM |
-| A Mac from 2020 or earlier | `…-macos-x64.zip` | macOS 11+ on Intel |
-| A Mac with Apple silicon (M1–M4) | `…-macos-arm64.zip` | macOS 11+ on Apple silicon |
+| A PC | `FestivalNet-Scraper-<version>-windows-x64.exe` | Windows 10/11, Intel or AMD |
+| A Windows-on-ARM PC (Surface Pro X, Snapdragon laptops) | `…-windows-arm64.exe` | Windows 11 on ARM |
+| A Mac from 2020 or earlier | `…-macos-x64.dmg` | macOS 11+ on Intel |
+| A Mac with Apple silicon (M1–M4) | `…-macos-arm64.dmg` | macOS 11+ on Apple silicon |
 
 Not sure which Mac you have: **Apple menu → About This Mac**. "Chip: Apple
 M…" means arm64; "Processor: Intel…" means x64. On Windows: **Settings →
 System → About → System type**.
 
-Unzip, then:
-
-* **Windows** — open the folder and double-click **FestivalNet Scraper**.
-  The first launch shows *"Windows protected your PC"*, because the app is
-  not code-signed. Click **More info → Run anyway**.
-* **macOS** — drag **FestivalNet Scraper** to Applications, then
-  **right-click it → Open** the first time (double-clicking an unsigned
-  app just refuses). Confirm once and it opens normally after that.
+* **Windows** — one self-contained `.exe`; nothing to unpack. Double-click
+  it. The first launch shows *"Windows protected your PC"*, because the app
+  is not code-signed: click **More info → Run anyway**. (It takes a second
+  or two to start, because a one-file build unpacks itself each launch.)
+* **macOS** — open the `.dmg` and drag **FestivalNet Scraper** to the
+  Applications folder beside it, then **right-click the app → Open** the
+  first time (double-clicking an unsigned app just refuses). Confirm once
+  and it opens normally after that.
 
 ### From source
 
@@ -141,10 +141,10 @@ default.
 pip install -r requirements-build.txt
 python packaging/build.py                    # this machine's platform + arch
 python packaging/build.py --target arm64     # macOS cross-build
-python packaging/build.py --dmg              # also roll a .dmg (macOS)
 ```
 
-Each run writes an app folder and a zip into `dist/`. One caveat worth
+Each run writes the app and its release artifact into `dist/` — a single
+`.exe` on Windows, a `.dmg` on macOS. One caveat worth
 knowing before you plan a build: **Windows cannot cross-build.** A frozen
 app embeds the CPython and compiled extension modules of the machine that
 built it, so a Windows ARM64 app has to come off an ARM64 Windows machine.

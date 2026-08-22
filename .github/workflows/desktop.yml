@@ -91,15 +91,20 @@ jobs:
         shell: bash
         run: |
           if [ "$RUNNER_OS" = "macOS" ]; then
+            # The .app, before it is sealed into the .dmg.
             "dist/FestivalNet Scraper.app/Contents/MacOS/FestivalNet Scraper" --check
           else
-            "dist/FestivalNet Scraper/FestivalNet Scraper.exe" --check
+            # The one-file .exe is the deliverable itself.
+            "$(ls dist/*.exe | head -1)" --check
           fi
 
       - uses: actions/upload-artifact@v4
         with:
           name: festivalnet-scraper-${{ matrix.arch }}-${{ runner.os }}
-          path: dist/*.zip
+          # .exe on Windows, .dmg on macOS — whichever this runner made.
+          path: |
+            dist/*.exe
+            dist/*.dmg
           if-no-files-found: error
           retention-days: 30
 
@@ -121,8 +126,9 @@ jobs:
         run: |
           ls -la artifacts
           missing=""
-          for target in windows-x64 windows-arm64 macos-x64 macos-arm64; do
-            if ls artifacts/*"$target".zip >/dev/null 2>&1; then
+          for target in windows-x64.exe windows-arm64.exe \
+                        macos-x64.dmg macos-arm64.dmg; do
+            if ls artifacts/*"$target" >/dev/null 2>&1; then
               echo "present: $target"
             else
               echo "MISSING: $target"
@@ -130,7 +136,7 @@ jobs:
             fi
           done
           # A release with no downloads at all is worse than no release.
-          if ! ls artifacts/*.zip >/dev/null 2>&1; then
+          if ! ls artifacts/*.exe artifacts/*.dmg >/dev/null 2>&1; then
             echo "::error::No build artifacts to publish."
             exit 1
           fi
@@ -140,7 +146,9 @@ jobs:
 
       - uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/*.zip
+          files: |
+            artifacts/*.exe
+            artifacts/*.dmg
           # Published, not drafted: a draft release is invisible on the
           # Releases page, so the downloads would not actually reach anyone.
           draft: false
@@ -151,12 +159,12 @@ jobs:
             Desktop builds of the FestivalNet Scraper. Download the one that
             matches your machine, unzip it, and run **FestivalNet Scraper**.
 
-            | You have | Download |
-            |----------|----------|
-            | A Windows PC | `...-windows-x64.zip` |
-            | A Windows-on-ARM PC | `...-windows-arm64.zip` |
-            | A Mac with Apple silicon (M1-M4) | `...-macos-arm64.zip` |
-            | An Intel Mac (2020 or earlier) | `...-macos-x64.zip` |
+            | You have | Download | Then |
+            |----------|----------|------|
+            | A Windows PC | `...-windows-x64.exe` | Double-click it |
+            | A Windows-on-ARM PC | `...-windows-arm64.exe` | Double-click it |
+            | A Mac with Apple silicon (M1-M4) | `...-macos-arm64.dmg` | Open it, drag the app to Applications |
+            | An Intel Mac (2020 or earlier) | `...-macos-x64.dmg` | Open it, drag the app to Applications |
 
             Not sure which Mac: **Apple menu -> About This Mac**. On Windows:
             **Settings -> System -> About -> System type**.
