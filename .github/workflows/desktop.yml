@@ -178,10 +178,17 @@ jobs:
     # release_tag.  The second exists because creating a tag is not always
     # something the person cutting the release can do from a shell — a
     # scoped credential may allow branch pushes and refuse tag refs — while
-    # GITHUB_TOKEN in here always can.  On a tag push `inputs` is null,
-    # which compares equal to '' in GitHub expressions, so only the
-    # startsWith arm fires.
-    if: startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != ''
+    # GITHUB_TOKEN in here always can.
+    #
+    # The event_name guard is not redundant.  Without it the second arm
+    # reads `inputs.release_tag != ''` on pull_request runs too, where
+    # `inputs` is null, and the whole job hangs on how GitHub coerces null
+    # against a string.  Get that wrong and every PR publishes a release
+    # named after its merge ref.  Naming the event costs nothing and does
+    # not depend on knowing the coercion rule.
+    if: >-
+      startsWith(github.ref, 'refs/tags/v') ||
+      (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')
     runs-on: ubuntu-latest
     permissions:
       contents: write
