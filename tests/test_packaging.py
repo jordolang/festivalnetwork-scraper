@@ -60,6 +60,27 @@ def test_every_host_arch_alias_maps_somewhere_known(build):
         assert build.ARCH_ALIASES[alias] in build.PYINSTALLER_ARCH
 
 
+def test_packaging_windows_leaves_exactly_one_exe(build, monkeypatch, tmp_path):
+    """Two .exe files in dist/ meant two uploads, and a name collision.
+
+    The workflow uploads `dist/*.exe`, and PyInstaller's unversioned output
+    has the same name in every Windows job, so a leftover copy reached the
+    release as a fifth asset whose architecture depended on merge order.
+    """
+    monkeypatch.setattr(build, "host_os", lambda: "windows")
+    monkeypatch.setattr(build, "DIST", tmp_path / "dist")
+    (tmp_path / "dist").mkdir()
+    raw = tmp_path / "dist" / "FestivalNet Scraper.exe"
+    raw.write_bytes(b"MZ frozen app")
+
+    artifact = build.package(raw, "x64")
+
+    exes = sorted(p.name for p in (tmp_path / "dist").glob("*.exe"))
+    assert exes == [artifact.name], f"dist/ should hold only {artifact.name}"
+    assert artifact.read_bytes() == b"MZ frozen app"
+    assert not raw.exists()
+
+
 # ---------------------------------------------------------------------------
 # hdiutil retry — "Resource busy" is a device that clears, not a bad build
 # ---------------------------------------------------------------------------
