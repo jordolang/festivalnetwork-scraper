@@ -107,10 +107,13 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: festivalnet-scraper-${{ matrix.arch }}-${{ runner.os }}
-          # .exe on Windows, .dmg on macOS — whichever this runner made.
+          # The versioned artifact only.  A bare `dist/*.exe` also swept up
+          # PyInstaller's unversioned output, which every Windows job names
+          # identically — so merging the artifacts collapsed them and the
+          # release gained a fifth download of indeterminate architecture.
           path: |
-            dist/*.exe
-            dist/*.dmg
+            dist/FestivalNet-Scraper-*.exe
+            dist/FestivalNet-Scraper-*.dmg
           if-no-files-found: error
           retention-days: 30
 
@@ -165,7 +168,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: festivalnet-scraper-universal2-macOS
-          path: dist/*.dmg
+          path: dist/FestivalNet-Scraper-*.dmg
           if-no-files-found: error
           retention-days: 30
 

@@ -123,9 +123,17 @@ def package(built: Path, arch: str) -> Path:
     if host_os() == "windows":
         # The one-file build already *is* the deliverable; it only needs
         # the name that says which machine it belongs to.
+        #
+        # Moved, not copied.  A copy leaves PyInstaller's unversioned
+        # `FestivalNet Scraper.exe` beside it, and the workflow uploads
+        # `dist/*.exe` — so both went out, and because every Windows job
+        # produces that same unversioned name, merging the artifacts
+        # collapsed them onto each other.  The release ended up with a
+        # nameless fifth download whose architecture was decided by which
+        # job merged last.
         target = artifact_name(arch, ".exe")
         target.unlink(missing_ok=True)
-        shutil.copy2(built, target)
+        shutil.move(str(built), str(target))
         return target
     # Linux is not a release target; a tarball keeps local builds tidy.
     target = artifact_name(arch, ".tar.gz")
