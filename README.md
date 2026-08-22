@@ -39,27 +39,30 @@ and a one-click export.
 
 ### A prebuilt app
 
-Each release carries four builds. Take the one that matches your machine:
+Grab it from
+**[Releases](https://github.com/jordolang/festivalnetwork-scraper/releases)**.
+Each release carries a build per platform and architecture — take the one
+that matches your machine:
 
 | You have | Download | Runs on |
 |----------|----------|---------|
-| A PC | `FestivalNet-Scraper-<version>-windows-x64.zip` | Windows 10/11, Intel or AMD |
-| A Windows-on-ARM PC (Surface Pro X, Snapdragon laptops) | `…-windows-arm64.zip` | Windows 11 on ARM |
-| A Mac from 2020 or earlier | `…-macos-x64.zip` | macOS 11+ on Intel |
-| A Mac with Apple silicon (M1–M4) | `…-macos-arm64.zip` | macOS 11+ on Apple silicon |
+| A PC | `FestivalNet-Scraper-<version>-windows-x64.exe` | Windows 10/11, Intel or AMD |
+| A Windows-on-ARM PC (Surface Pro X, Snapdragon laptops) | `…-windows-arm64.exe` | Windows 11 on ARM |
+| A Mac with Apple silicon (M1–M4) | `…-macos-arm64.dmg` | macOS 11+ on Apple silicon |
+| A Mac from 2020 or earlier, or you're not sure | `…-macos-universal2.dmg` | macOS 11+, Intel **or** Apple silicon |
 
 Not sure which Mac you have: **Apple menu → About This Mac**. "Chip: Apple
 M…" means arm64; "Processor: Intel…" means x64. On Windows: **Settings →
 System → About → System type**.
 
-Unzip, then:
-
-* **Windows** — open the folder and double-click **FestivalNet Scraper**.
-  The first launch shows *"Windows protected your PC"*, because the app is
-  not code-signed. Click **More info → Run anyway**.
-* **macOS** — drag **FestivalNet Scraper** to Applications, then
-  **right-click it → Open** the first time (double-clicking an unsigned
-  app just refuses). Confirm once and it opens normally after that.
+* **Windows** — one self-contained `.exe`; nothing to unpack. Double-click
+  it. The first launch shows *"Windows protected your PC"*, because the app
+  is not code-signed: click **More info → Run anyway**. (It takes a second
+  or two to start, because a one-file build unpacks itself each launch.)
+* **macOS** — open the `.dmg` and drag **FestivalNet Scraper** to the
+  Applications folder beside it, then **right-click the app → Open** the
+  first time (double-clicking an unsigned app just refuses). Confirm once
+  and it opens normally after that.
 
 ### From source
 
@@ -138,21 +141,35 @@ default.
 pip install -r requirements-build.txt
 python packaging/build.py                    # this machine's platform + arch
 python packaging/build.py --target arm64     # macOS cross-build
-python packaging/build.py --dmg              # also roll a .dmg (macOS)
 ```
 
-Each run writes an app folder and a zip into `dist/`. One caveat worth
+Each run writes the app and its release artifact into `dist/` — a single
+`.exe` on Windows, a `.dmg` on macOS. One caveat worth
 knowing before you plan a build: **Windows cannot cross-build.** A frozen
 app embeds the CPython and compiled extension modules of the machine that
 built it, so a Windows ARM64 app has to come off an ARM64 Windows machine.
 macOS can cross-build with `--target`, provided every wheel in the
 environment carries the slice you are asking for.
 
-`.github/workflows/desktop.yml` does all four on GitHub's runners —
-`windows-latest`, `windows-11-arm`, `macos-13` and `macos-14` — runs the
-test suite first, and attaches the zips to a draft release on a `v*` tag.
-The ARM64 Windows job is marked `continue-on-error`, so a repository
-without access to those runners still gets the other three.
+`.github/workflows/desktop.yml` builds them on GitHub's runners —
+`windows-latest`, `windows-11-arm` and `macos-14` — runs the test suite
+first, and publishes to a GitHub release on a `v*` tag:
+
+```bash
+git tag -a v1.2.3 -m "FestivalNet Scraper 1.2.3"
+git push origin v1.2.3
+```
+
+There is no `macos-13` job. GitHub is winding that Intel image down and it
+no longer reliably grants a runner — and a job stuck in the queue never
+*concludes*, so `continue-on-error` cannot rescue it and the release waits
+forever behind it. Intel Macs are served instead by a **universal2** build
+produced on Apple silicon, which runs on both.
+
+Windows ARM64 and the universal2 Mac build are both allowed to fail
+without blocking a release; the release step names anything missing rather
+than quietly shipping a short set, and refuses outright if a target whose
+runner is always available did not build.
 
 ## Where it keeps things
 

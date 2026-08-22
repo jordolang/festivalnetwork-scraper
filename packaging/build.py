@@ -2,14 +2,14 @@
 
     python packaging/build.py                  # this machine's architecture
     python packaging/build.py --target arm64   # macOS cross-build
-    python packaging/build.py --dmg            # also roll a .dmg
 
-Four artifacts are supported, one per platform/architecture pair:
+Four artifacts, one per platform/architecture pair, each in the form that
+platform's users expect to download:
 
-    FestivalNet-Scraper-<version>-windows-x64.zip
-    FestivalNet-Scraper-<version>-windows-arm64.zip
-    FestivalNet-Scraper-<version>-macos-x64.zip
-    FestivalNet-Scraper-<version>-macos-arm64.zip
+    FestivalNet-Scraper-<version>-windows-x64.exe     one self-contained .exe
+    FestivalNet-Scraper-<version>-windows-arm64.exe
+    FestivalNet-Scraper-<version>-macos-x64.dmg       a mountable disk image
+    FestivalNet-Scraper-<version>-macos-arm64.dmg
 
 Windows cannot cross-build: an ARM64 .exe has to come off an ARM64
 runner, because the frozen app embeds that machine's CPython and its
@@ -89,6 +89,15 @@ def check_prerequisites() -> None:
         run([sys.executable, str(ROOT / "tools" / "make_app_icon.py")])
 
 
+def raw_output() -> Path:
+    """What PyInstaller leaves in dist/, before it is named for release."""
+    if host_os() == "macos":
+        return DIST / f"{APP_NAME}.app"
+    if host_os() == "windows":
+        return DIST / f"{APP_NAME}.exe"
+    return DIST / APP_NAME
+
+
 def freeze(target_arch: str | None) -> Path:
     env = dict(os.environ, FN_VERSION=version())
     if target_arch:
@@ -96,37 +105,45 @@ def freeze(target_arch: str | None) -> Path:
     run([sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean",
          "--distpath", str(DIST), "--workpath", str(BUILD), str(SPEC)],
         env=env, cwd=str(ROOT))
-    built = DIST / (f"{APP_NAME}.app" if host_os() == "macos" else APP_NAME)
+    built = raw_output()
     if not built.exists():
         sys.exit(f"PyInstaller did not produce {built}")
     return built
 
 
+def artifact_name(arch: str, suffix: str) -> Path:
+    return DIST / f"FestivalNet-Scraper-{version()}-{host_os()}-{arch}{suffix}"
+
+
 def package(built: Path, arch: str) -> Path:
-    stem = f"FestivalNet-Scraper-{version()}-{host_os()}-{arch}"
-    archive = DIST / f"{stem}.zip"
-    archive.unlink(missing_ok=True)
+    """Turn the raw build into the file people download."""
     if host_os() == "macos":
-        # ditto, not zip: a .app is full of symlinked frameworks and
-        # executable bits that a naive archiver flattens, and macOS then
-        # refuses to open the copy.
-        run(["ditto", "-c", "-k", "--sequesterRsrc", "--keepParent",
-             str(built), str(archive)])
-    else:
-        shutil.make_archive(str(archive.with_suffix("")), "zip",
-                            root_dir=str(built.parent), base_dir=built.name)
-    return archive
+        return make_dmg(built, arch)
+    if host_os() == "windows":
+        # The one-file build already *is* the deliverable; it only needs
+        # the name that says which machine it belongs to.
+        target = artifact_name(arch, ".exe")
+        target.unlink(missing_ok=True)
+        shutil.copy2(built, target)
+        return target
+    # Linux is not a release target; a tarball keeps local builds tidy.
+    target = artifact_name(arch, ".tar.gz")
+    target.unlink(missing_ok=True)
+    shutil.make_archive(str(target).removesuffix(".tar.gz"), "gztar",
+                        root_dir=str(built.parent), base_dir=built.name)
+    return target
 
 
-def make_dmg(built: Path, arch: str) -> Path | None:
-    if host_os() != "macos":
-        print("Skipping .dmg: only macOS can make one.")
-        return None
-    dmg = DIST / f"FestivalNet-Scraper-{version()}-macos-{arch}.dmg"
+def make_dmg(built: Path, arch: str) -> Path:
+    """A mountable image with the app and a drag-here Applications link."""
+    dmg = artifact_name(arch, ".dmg")
     dmg.unlink(missing_ok=True)
     staging = BUILD / "dmg"
     shutil.rmtree(staging, ignore_errors=True)
     staging.mkdir(parents=True)
+    # cp -R, not shutil.copytree: a .app is full of symlinked frameworks
+    # and executable bits that a naive copy flattens, and macOS then
+    # refuses to open the result.
     run(["cp", "-R", str(built), str(staging / built.name)])
     os.symlink("/Applications", staging / "Applications")
     run(["hdiutil", "create", "-volname", APP_NAME, "-srcfolder", str(staging),
@@ -140,10 +157,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--target", choices=sorted(set(ARCH_ALIASES.values())),
                         help="architecture to build for (macOS only; "
                              "defaults to this machine's)")
-    parser.add_argument("--dmg", action="store_true",
-                        help="also build a .dmg (macOS only)")
-    parser.add_argument("--no-archive", action="store_true",
-                        help="leave the app folder, skip the .zip")
+    parser.add_argument("--no-package", action="store_true",
+                        help="leave PyInstaller's raw output, skip the "
+                             ".dmg/.exe naming step")
     args = parser.parse_args(argv)
 
     arch = args.target or host_arch()
@@ -158,12 +174,8 @@ def main(argv: list[str] | None = None) -> int:
     built = freeze(args.target if host_os() == "macos" else None)
     print(f"App: {built}")
 
-    if not args.no_archive:
-        print(f"Archive: {package(built, arch)}")
-    if args.dmg:
-        dmg = make_dmg(built, arch)
-        if dmg:
-            print(f"Disk image: {dmg}")
+    if not args.no_package:
+        print(f"Artifact: {package(built, arch)}")
     return 0
 
 

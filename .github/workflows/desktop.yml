@@ -44,6 +44,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # No macos-13 entry.  GitHub is winding that image down and the job
+        # never acquires a runner — and a queued job never *concludes*, so
+        # continue-on-error cannot rescue it and `needs: build` waits
+        # forever.  An unobtainable runner has to be out of the dependency
+        # graph entirely, not merely marked optional.  Intel Macs are served
+        # by the universal2 job below instead.
         include:
           - label: Windows x64
             runner: windows-latest
@@ -53,10 +59,6 @@ jobs:
             runner: windows-11-arm
             arch: arm64
             optional: true
-          - label: macOS Intel
-            runner: macos-13
-            arch: x64
-            optional: false
           - label: macOS Apple Silicon
             runner: macos-14
             arch: arm64
@@ -87,20 +89,82 @@ jobs:
         shell: bash
         run: |
           if [ "$RUNNER_OS" = "macOS" ]; then
+            # The .app, before it is sealed into the .dmg.
             "dist/FestivalNet Scraper.app/Contents/MacOS/FestivalNet Scraper" --check
           else
-            "dist/FestivalNet Scraper/FestivalNet Scraper.exe" --check
+            # The one-file .exe is the deliverable itself.
+            "$(ls dist/*.exe | head -1)" --check
           fi
 
       - uses: actions/upload-artifact@v4
         with:
           name: festivalnet-scraper-${{ matrix.arch }}-${{ runner.os }}
-          path: dist/*.zip
+          # .exe on Windows, .dmg on macOS — whichever this runner made.
+          path: |
+            dist/*.exe
+            dist/*.dmg
+          if-no-files-found: error
+          retention-days: 30
+
+  universal-mac:
+    name: macOS universal (Intel + Apple silicon)
+    needs: test
+    runs-on: macos-14
+    # Optional, and genuinely so: this runner concludes either way, so a
+    # failure here cannot stall the release the way a queued job would.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install a universal2 CPython
+        # actions/setup-python serves a single-architecture build, and
+        # PyInstaller can only emit a universal2 app from a universal2
+        # interpreter.  The python.org installer is the one that ships both
+        # slices, Tk included.
+        run: |
+          set -euo pipefail
+          curl -fsSL -o /tmp/python.pkg \
+            https://www.python.org/ftp/python/3.12.10/python-3.12.10-macos11.pkg
+          sudo installer -pkg /tmp/python.pkg -target /
+          echo "/Library/Frameworks/Python.framework/Versions/3.12/bin" \
+            >> "$GITHUB_PATH"
+
+      - name: Confirm it really is universal2
+        run: |
+          set -euo pipefail
+          python3 -c "import sys, tkinter; print(sys.executable, tkinter.TkVersion)"
+          # Refuse to continue on a single-slice interpreter: the build would
+          # succeed and quietly produce an arm64-only app called universal.
+          lipo -archs "$(python3 -c 'import sys; print(sys.executable)')" | tee /tmp/archs
+          grep -q x86_64 /tmp/archs
+          grep -q arm64 /tmp/archs
+
+      - name: Build the universal app
+        run: |
+          set -euo pipefail
+          python3 -m pip install --upgrade pip
+          python3 -m pip install -r requirements-build.txt
+          python3 packaging/build.py --target universal2
+
+      - name: Verify the frozen app starts
+        run: '"dist/FestivalNet Scraper.app/Contents/MacOS/FestivalNet Scraper" --check'
+
+      - name: Confirm the app carries both slices
+        run: |
+          set -euo pipefail
+          lipo -archs "dist/FestivalNet Scraper.app/Contents/MacOS/FestivalNet Scraper"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: festivalnet-scraper-universal2-macOS
+          path: dist/*.dmg
           if-no-files-found: error
           retention-days: 30
 
   release:
-    name: Attach to release
+    name: Publish release
+    # Deliberately not waiting on universal-mac: it is a bonus artifact, and
+    # nothing optional belongs on the critical path to a release.
     needs: build
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
@@ -111,10 +175,73 @@ jobs:
         with:
           path: artifacts
           merge-multiple: true
-      - name: List what will be published
-        run: ls -la artifacts
+
+      - name: Check which targets actually built
+        shell: bash
+        run: |
+          ls -la artifacts
+          absent() { ! ls artifacts/*"$1" >/dev/null 2>&1; }
+
+          # Required: their runners are always obtainable, so a gap here is
+          # a real build failure and must stop the release.
+          fatal=""
+          for target in windows-x64.exe macos-arm64.dmg; do
+            if absent "$target"; then
+              echo "MISSING (required): $target"
+              fatal="$fatal $target"
+            else
+              echo "present: $target"
+            fi
+          done
+
+          # Optional: nice to have, but their absence is a runner or
+          # toolchain fact, not a reason to withhold every other download.
+          missing=""
+          for target in windows-arm64.exe macos-universal2.dmg; do
+            if absent "$target"; then
+              echo "missing (optional): $target"
+              missing="$missing $target"
+            else
+              echo "present: $target"
+            fi
+          done
+
+          if [ -n "$fatal" ]; then
+            echo "::error::Refusing to publish without:$fatal"
+            exit 1
+          fi
+          if [ -n "$missing" ]; then
+            echo "::warning::Publishing without:$missing"
+          fi
+
       - uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/*.zip
-          draft: true
+          files: |
+            artifacts/*.exe
+            artifacts/*.dmg
+          # Published, not drafted: a draft release is invisible on the
+          # Releases page, so the downloads would not actually reach anyone.
+          draft: false
+          fail_on_unmatched_files: true
           generate_release_notes: true
+          name: FestivalNet Scraper ${{ github.ref_name }}
+          body: |
+            Desktop builds of the FestivalNet Scraper. Download the one that
+            matches your machine, unzip it, and run **FestivalNet Scraper**.
+
+            | You have | Download | Then |
+            |----------|----------|------|
+            | A Windows PC | `...-windows-x64.exe` | Double-click it |
+            | A Windows-on-ARM PC | `...-windows-arm64.exe` | Double-click it |
+            | A Mac with Apple silicon (M1-M4) | `...-macos-arm64.dmg` | Open it, drag the app to Applications |
+            | An Intel Mac (2020 or earlier) | `...-macos-universal2.dmg` | Open it, drag the app to Applications |
+
+            The `universal2` build runs on *any* Mac, Intel or Apple
+            silicon, so take that one if you are unsure.
+
+            Not sure which Mac: **Apple menu -> About This Mac**. On Windows:
+            **Settings -> System -> About -> System type**.
+
+            These builds are unsigned, so the first launch needs
+            **More info -> Run anyway** on Windows, or **right-click -> Open**
+            on macOS. Afterwards they open normally.
