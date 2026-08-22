@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import platform
 import sys
 from datetime import date
 from pathlib import Path
@@ -51,9 +52,9 @@ def build_parser() -> argparse.ArgumentParser:
             "festivalnet.com listings."
         ),
         epilog=(
-            "Subcommands: setup (configure this business), best (one-button "
-            "weekend booking plan), apply (download and fill in vendor "
-            "applications)."
+            "Subcommands: gui (open the desktop window), setup (configure "
+            "this business), best (one-button weekend booking plan), apply "
+            "(download and fill in vendor applications)."
         ),
     )
     p.add_argument("--weeks", type=int, default=8,
@@ -293,6 +294,22 @@ def apply_main(argv: list[str]) -> int:
     return 0
 
 
+def curses_hint() -> str:
+    """What to do about a missing curses module, honestly, per platform.
+
+    ``pip install windows-curses`` is the answer on Intel Windows and a
+    dead end on Windows-on-ARM, where that project publishes no wheel —
+    telling an ARM user to install it just sends them to a build error.
+    """
+    if sys.platform != "win32":
+        return "To enable it, install your Python's curses support."
+    if platform.machine().upper() == "ARM64":
+        return ("windows-curses has no ARM64 build, so the picker cannot "
+                "run here.  For an interactive list, use the desktop app:  "
+                "python -m fnscraper gui")
+    return "To enable it:  pip install windows-curses"
+
+
 def resolve_categories(args) -> set[str]:
     """Turn the category-related CLI flags into a set of active keys."""
     if args.all_categories:
@@ -322,6 +339,9 @@ def main(argv: list[str] | None = None) -> int:
     if argv[:1] == ["setup"]:
         from . import setup_wizard
         return setup_wizard.main(argv[1:])
+    if argv[:1] == ["gui"]:
+        from . import gui
+        return gui.main(argv[1:])
     args = build_parser().parse_args(argv)
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
@@ -390,7 +410,7 @@ def main(argv: list[str] | None = None) -> int:
     if interactive and not tui.picker_available():
         print("The interactive picker is unavailable on this Python "
               "(no curses module); printing the list instead.\n"
-              "To enable it:  pip install windows-curses\n")
+              + curses_hint() + "\n")
         interactive = False
     if interactive:
         selected = tui.run_picker(scored)

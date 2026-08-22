@@ -1,0 +1,120 @@
+name: Desktop builds
+
+# Four artifacts, one per platform/architecture pair.  Windows cannot
+# cross-build, so the ARM64 Windows app is built on an ARM64 runner and
+# the Intel Mac app on an Intel runner; each frozen app embeds the
+# CPython and extension modules of the machine that built it.
+
+on:
+  push:
+    branches: ["main"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-tk xvfb
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pytest
+      - name: Run the suite
+        # xvfb-run gives the window tests a display; the rest do not care.
+        run: xvfb-run -a python -m pytest -q
+
+  build:
+    name: ${{ matrix.label }}
+    needs: test
+    runs-on: ${{ matrix.runner }}
+    # A repository without ARM64 Windows runners still gets the other
+    # three artifacts instead of a red build.
+    continue-on-error: ${{ matrix.optional }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: Windows x64
+            runner: windows-latest
+            arch: x64
+            optional: false
+          - label: Windows ARM64
+            runner: windows-11-arm
+            arch: arm64
+            optional: true
+          - label: macOS Intel
+            runner: macos-13
+            arch: x64
+            optional: false
+          - label: macOS Apple Silicon
+            runner: macos-14
+            arch: arm64
+            optional: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-build.txt
+
+      - name: Check Tk is present
+        run: python -c "import tkinter, sys; print('Tk', tkinter.TkVersion, sys.platform)"
+
+      - name: Build the app
+        run: python packaging/build.py
+
+      - name: Verify the frozen app starts
+        # The app that just got built, not the source tree it was built
+        # from: a missing hidden import or an icon left out of the bundle
+        # only shows up in the frozen copy, and importing the checkout
+        # would sail past both.
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            "dist/FestivalNet Scraper.app/Contents/MacOS/FestivalNet Scraper" --check
+          else
+            "dist/FestivalNet Scraper/FestivalNet Scraper.exe" --check
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: festivalnet-scraper-${{ matrix.arch }}-${{ runner.os }}
+          path: dist/*.zip
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    name: Attach to release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: List what will be published
+        run: ls -la artifacts
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*.zip
+          draft: true
+          generate_release_notes: true

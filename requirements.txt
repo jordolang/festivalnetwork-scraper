@@ -2,6 +2,9 @@ requests>=2.31
 beautifulsoup4>=4.12
 openpyxl>=3.1
 pypdf>=4.0
-# The interactive picker is a curses app; Windows Python has no
-# curses in its standard library, so supply it there.
-windows-curses>=2.3.2; sys_platform == "win32"
+# The interactive picker is a curses app; Windows Python has no curses in
+# its standard library, so supply it there.  Not on Windows-on-ARM, where
+# the project publishes no wheel at all — asking for it fails the whole
+# install, taking the CLI down with it.  The picker degrades to a plain
+# list there; the desktop app is the interactive option.
+windows-curses>=2.3.2; sys_platform == "win32" and platform_machine != "ARM64"
