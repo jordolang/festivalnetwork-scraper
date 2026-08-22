@@ -1,12 +1,11 @@
 # Packaging the desktop app
 
-Four artifacts, one per platform/architecture pair, each in the shape that
-platform's users expect:
+Four artifacts, each in the shape that platform's users expect:
 
-    FestivalNet-Scraper-<version>-windows-x64.exe     one self-contained .exe
+    FestivalNet-Scraper-<version>-windows-x64.exe        one self-contained .exe
     FestivalNet-Scraper-<version>-windows-arm64.exe
-    FestivalNet-Scraper-<version>-macos-x64.dmg       a mountable disk image
-    FestivalNet-Scraper-<version>-macos-arm64.dmg
+    FestivalNet-Scraper-<version>-macos-arm64.dmg        a mountable disk image
+    FestivalNet-Scraper-<version>-macos-universal2.dmg   Intel + Apple silicon
 
 Windows gets a **one-file** build: everything is folded into the binary,
 which unpacks to a temp directory at launch.  That costs a second or two of
@@ -59,20 +58,27 @@ That runs the test suite, builds every target, and publishes a GitHub
 release with the zips attached. Keep the tag in step with
 `fnscraper.__version__`, since that is what names the artifacts.
 
-### When a Mac build is missing
+### Why there is no Intel macOS runner
 
-macOS Intel builds run on `macos-13`, the last Intel runner image, which
-GitHub is winding down — jobs against it can queue indefinitely. The job
-is therefore `continue-on-error`, and a release can go out without it; the
-workflow logs a warning naming what is absent.
+`macos-13` was the last Intel runner image and GitHub is winding it down;
+jobs targeting it queue and frequently never start. Marking such a job
+`continue-on-error` does **not** help: that only applies to a job that
+runs and fails, while a job stuck in the queue never concludes at all — so
+anything depending on it waits indefinitely. An unobtainable runner has to
+be out of the dependency graph, not merely optional within it.
 
-The durable fix is to stop needing an Intel runner at all: build one
-**universal2** app on Apple silicon that runs on both. PyInstaller's
-`--target universal2` (already wired to `build.py --target universal2`)
-needs a universal2 CPython, which `actions/setup-python` does not provide
-— it would have to come from the python.org installer. Every dependency
-here is pure Python, so nothing else stands in the way. Untested, hence
-not wired into CI yet.
+Intel Macs are served instead by a **universal2** build made on Apple
+silicon, which carries both slices in one app. PyInstaller can only emit
+that from a universal2 interpreter, which `actions/setup-python` does not
+provide, so the job installs CPython from the python.org `.pkg` — the
+build that ships both architectures, Tk included. It then asserts with
+`lipo` that the interpreter really has both slices before building, since
+a single-slice interpreter would happily produce an arm64-only app wearing
+a universal name.
+
+That job is `continue-on-error`, which is safe here precisely because its
+runner is obtainable: it concludes one way or the other rather than
+hanging. The release does not wait on it.
 
 ## Signing and notarizing (optional)
 

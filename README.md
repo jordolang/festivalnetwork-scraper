@@ -48,8 +48,8 @@ that matches your machine:
 |----------|----------|---------|
 | A PC | `FestivalNet-Scraper-<version>-windows-x64.exe` | Windows 10/11, Intel or AMD |
 | A Windows-on-ARM PC (Surface Pro X, Snapdragon laptops) | `…-windows-arm64.exe` | Windows 11 on ARM |
-| A Mac from 2020 or earlier | `…-macos-x64.dmg` | macOS 11+ on Intel |
 | A Mac with Apple silicon (M1–M4) | `…-macos-arm64.dmg` | macOS 11+ on Apple silicon |
+| A Mac from 2020 or earlier, or you're not sure | `…-macos-universal2.dmg` | macOS 11+, Intel **or** Apple silicon |
 
 Not sure which Mac you have: **Apple menu → About This Mac**. "Chip: Apple
 M…" means arm64; "Processor: Intel…" means x64. On Windows: **Settings →
@@ -151,21 +151,25 @@ built it, so a Windows ARM64 app has to come off an ARM64 Windows machine.
 macOS can cross-build with `--target`, provided every wheel in the
 environment carries the slice you are asking for.
 
-`.github/workflows/desktop.yml` does all four on GitHub's runners —
-`windows-latest`, `windows-11-arm`, `macos-13` and `macos-14` — runs the
-test suite first, and publishes the zips to a GitHub release on a `v*` tag:
+`.github/workflows/desktop.yml` builds them on GitHub's runners —
+`windows-latest`, `windows-11-arm` and `macos-14` — runs the test suite
+first, and publishes to a GitHub release on a `v*` tag:
 
 ```bash
 git tag -a v1.2.3 -m "FestivalNet Scraper 1.2.3"
 git push origin v1.2.3
 ```
 
-Two of the four jobs are marked `continue-on-error`, because their runners
-are not always obtainable: Windows ARM64 (not every repository has access)
-and macOS Intel (GitHub is winding those runners down, and they can sit
-queued indefinitely). The release step names any target that is missing
-rather than quietly shipping a short set, and refuses to publish a release
-with no downloads at all.
+There is no `macos-13` job. GitHub is winding that Intel image down and it
+no longer reliably grants a runner — and a job stuck in the queue never
+*concludes*, so `continue-on-error` cannot rescue it and the release waits
+forever behind it. Intel Macs are served instead by a **universal2** build
+produced on Apple silicon, which runs on both.
+
+Windows ARM64 and the universal2 Mac build are both allowed to fail
+without blocking a release; the release step names anything missing rather
+than quietly shipping a short set, and refuses outright if a target whose
+runner is always available did not build.
 
 ## Where it keeps things
 
