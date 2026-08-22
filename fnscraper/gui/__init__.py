@@ -11,7 +11,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-__all__ = ["available", "launch", "main", "selftest"]
+__all__ = ["available", "launch", "main", "say", "selftest"]
 
 MISSING_TK = (
     "This build of Python has no Tk support, so the desktop window cannot "
@@ -21,6 +21,38 @@ MISSING_TK = (
     "  Fedora:        sudo dnf install python3-tkinter\n"
     "The command-line scraper still works: python -m fnscraper --help"
 )
+
+
+def say(text: str, error: bool = False) -> None:
+    """Print, on a build that may have nowhere to print to.
+
+    A windowed PyInstaller app is a GUI-subsystem binary, and started
+    without inherited handles — double-clicked, or launched by a service —
+    it has ``sys.stdout`` and ``sys.stderr`` set to ``None``.  Bare
+    ``print`` survives that on its own (CPython makes it a no-op when the
+    stream is None), so this is not guarding against that crash.  It
+    guards two things ``print`` does not:
+
+    * a stream that exists but raises on write — a closed or half-attached
+      pipe — which ``print`` propagates straight out;
+    * ``print(..., file=sys.stderr)`` when stderr is None, which silently
+      falls back to *stdout* and files a problem report under the normal
+      output.
+
+    Under CI the streams are pipes and everything is written normally.
+    When they are absent the message is dropped: the exit code is the
+    contract, not the transcript.
+    """
+    stream = sys.stderr if error else sys.stdout
+    if stream is None:
+        return
+    try:
+        stream.write(text + "\n")
+        stream.flush()
+    except (OSError, ValueError, AttributeError):
+        # A closed or half-attached stream is not the app's problem to
+        # report — and reporting it is exactly what would fail.
+        pass
 
 
 def available() -> bool:
@@ -52,30 +84,30 @@ def selftest() -> int:
     if not hasattr(app, "ScraperWindow"):
         problems.append("fnscraper.gui.app has no ScraperWindow")
     for module in (detail, grid, icons, panels, theme, viewmodel):
-        print(f"  imported {module.__name__}")
+        say(f"  imported {module.__name__}")
 
     icon = paths.resource_dir() / "assets" / "icons" / "festivalnet-256.png"
     if icon.is_file():
-        print(f"  found {icon}")
+        say(f"  found {icon}")
     else:
         problems.append(f"bundled icon missing: {icon}")
 
     try:
         root = tkinter.Tk()
         root.destroy()
-        print(f"  Tk {tkinter.TkVersion} opened a window")
+        say(f"  Tk {tkinter.TkVersion} opened a window")
     except tkinter.TclError as exc:
-        print(f"  Tk {tkinter.TkVersion} present, no display here ({exc})")
+        say(f"  Tk {tkinter.TkVersion} present, no display here ({exc})")
 
     for problem in problems:
-        print(f"  PROBLEM: {problem}", file=sys.stderr)
-    print("self-test failed" if problems else "self-test passed")
+        say(f"  PROBLEM: {problem}", error=True)
+    say("self-test failed" if problems else "self-test passed")
     return 1 if problems else 0
 
 
 def launch(sample: bool = False, results_file: Path | None = None) -> int:
     if not available():
-        print(MISSING_TK, file=sys.stderr)
+        say(MISSING_TK, error=True)
         return 2
     from .app import ScraperWindow
 
@@ -101,7 +133,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.check:
         if not available():
-            print(MISSING_TK, file=sys.stderr)
+            say(MISSING_TK, error=True)
             return 1
         return selftest()
     return launch(sample=args.sample, results_file=args.open)

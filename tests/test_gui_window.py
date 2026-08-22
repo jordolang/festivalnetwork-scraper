@@ -17,6 +17,51 @@ from fnscraper.gui import viewmodel as vm            # noqa: E402
 from fnscraper.gui.detail import TABS as DETAIL_TABS  # noqa: E402
 
 
+def test_selftest_survives_a_windowed_build_with_no_console(monkeypatch):
+    """A GUI-subsystem binary can have sys.stdout/stderr set to None.
+
+    CPython's print is a no-op on a None stream, so this never crashed —
+    but the self-test's verdict has to survive having nowhere to print it,
+    and that is worth pinning rather than rediscovering.
+    """
+    import sys
+
+    from fnscraper import gui
+
+    monkeypatch.setattr(sys, "stdout", None)
+    monkeypatch.setattr(sys, "stderr", None)
+    assert gui.selftest() == 0
+
+
+def test_selftest_still_fails_loudly_with_no_console(monkeypatch, tmp_path):
+    """Silent output must not become a silent pass."""
+    import sys
+
+    from fnscraper import gui
+    from fnscraper.gui import paths
+
+    monkeypatch.setattr(paths, "resource_dir", lambda: tmp_path)
+    monkeypatch.setattr(sys, "stdout", None)
+    monkeypatch.setattr(sys, "stderr", None)
+    assert gui.selftest() == 1
+
+
+def test_say_drops_output_rather_than_raising(monkeypatch):
+    import io
+    import sys
+
+    from fnscraper import gui
+
+    class Closed(io.StringIO):
+        def write(self, _text):
+            raise ValueError("I/O operation on closed file")
+
+    monkeypatch.setattr(sys, "stdout", Closed())
+    gui.say("this must not raise")
+    monkeypatch.setattr(sys, "stdout", None)
+    gui.say("nor this")
+
+
 def test_the_packaged_app_selftest_passes_here():
     """The check CI runs against the frozen build, run against the source.
 

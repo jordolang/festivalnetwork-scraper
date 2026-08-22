@@ -20,7 +20,15 @@ def main() -> int:
         return gui_main(sys.argv[1:])
     except Exception:                      # noqa: BLE001 - last-ditch reporter
         details = traceback.format_exc()
-        sys.stderr.write(details)
+        # Windowed builds can have no stderr at all (sys.stderr is None),
+        # and an AttributeError raised here would replace the real
+        # traceback and skip the dialog below — the one thing a user
+        # without a console would actually see.
+        try:
+            if sys.stderr is not None:
+                sys.stderr.write(details)
+        except Exception:                  # noqa: BLE001
+            pass
         try:
             import tkinter
             from tkinter import messagebox
