@@ -11,6 +11,14 @@ on:
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: >-
+          Publish a release at this tag, e.g. v1.0.0. Leave empty to just
+          build. The tag is created at the commit this run is dispatched
+          from, so it does not have to exist yet.
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -166,7 +174,14 @@ jobs:
     # Deliberately not waiting on universal-mac: it is a bonus artifact, and
     # nothing optional belongs on the critical path to a release.
     needs: build
-    if: startsWith(github.ref, 'refs/tags/v')
+    # Two ways in: push a v* tag, or dispatch this workflow with a
+    # release_tag.  The second exists because creating a tag is not always
+    # something the person cutting the release can do from a shell — a
+    # scoped credential may allow branch pushes and refuse tag refs — while
+    # GITHUB_TOKEN in here always can.  On a tag push `inputs` is null,
+    # which compares equal to '' in GitHub expressions, so only the
+    # startsWith arm fires.
+    if: startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != ''
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -224,7 +239,9 @@ jobs:
           draft: false
           fail_on_unmatched_files: true
           generate_release_notes: true
-          name: FestivalNet Scraper ${{ github.ref_name }}
+          # Creates the tag at this run's commit if it does not exist yet.
+          tag_name: ${{ inputs.release_tag || github.ref_name }}
+          name: FestivalNet Scraper ${{ inputs.release_tag || github.ref_name }}
           body: |
             Desktop builds of the FestivalNet Scraper. Download the one that
             matches your machine, unzip it, and run **FestivalNet Scraper**.

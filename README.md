@@ -160,6 +160,11 @@ git tag -a v1.2.3 -m "FestivalNet Scraper 1.2.3"
 git push origin v1.2.3
 ```
 
+If your credential refuses to push tags (some are scoped to branches and
+answer `HTTP 403` for `refs/tags/*`), use **Actions → Desktop builds → Run
+workflow** and put the tag in the **release_tag** box instead; the
+workflow creates it. See `packaging/README.md`.
+
 There is no `macos-13` job. GitHub is winding that Intel image down and it
 no longer reliably grants a runner — and a job stuck in the queue never
 *concludes*, so `continue-on-error` cannot rescue it and the release waits
