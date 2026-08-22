@@ -370,6 +370,16 @@ class Settings:
     username: str | None = None
     password: str | None = None
 
+    # Crawl behaviour the desktop app exposes as switches.  Every one of
+    # these has a plain-CLI default that reproduces the old behaviour, so
+    # turning them off is always the user asking for a shorter crawl.
+    request_delay: float = field(default_factory=lambda: REQUEST_DELAY_SECONDS)
+    max_retries: int = 3               # 1 == try once, never retry
+    scrape_details: bool = True        # fetch each event's detail page
+    geocode: bool = True               # resolve coordinates + drive time
+    include_contact: bool = True       # keep promoter contact fields
+    include_fees: bool = True          # keep real (Pro) fee fields
+
     @classmethod
     def from_env(cls, **overrides) -> "Settings":
         load_dotenv()

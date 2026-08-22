@@ -11,10 +11,166 @@ still the built-in defaults, but nothing about it is specific to salsa or
 to Ohio — **[install it on a Windows PC](#install-it-on-a-windows-pc)** and
 it asks you for your own numbers.
 
+There are two ways to drive it: the
+**[desktop app](#the-desktop-app-windows-and-macos)**, which ships as a
+Windows and a macOS build for both Intel and ARM, and the command line,
+which does the same work in one command.
+
 > **Note on the site:** `festivalnetwork.com` is a dead domain. The event
 > database this project scrapes is **[festivalnet.com](https://festivalnet.com)**
 > (FestivalNet), which lists 26,000+ North American events with public
 > attendance, exhibitor, admission, and location data.
+
+---
+
+# The desktop app (Windows and macOS)
+
+Everything the scraper does, in a window — no command prompt, on either
+platform, on both Intel and ARM.
+
+![The FestivalNet Scraper window](docs/desktop-overview.png)
+
+Set the search up on the left, press **Start Scraping**, and results fill
+in as they are scored. Click any row to see everything the scraper found
+about that show; the same results are also a map, a calendar, four charts,
+and a one-click export.
+
+## Get it
+
+### A prebuilt app
+
+Each release carries four builds. Take the one that matches your machine:
+
+| You have | Download | Runs on |
+|----------|----------|---------|
+| A PC | `FestivalNet-Scraper-<version>-windows-x64.zip` | Windows 10/11, Intel or AMD |
+| A Windows-on-ARM PC (Surface Pro X, Snapdragon laptops) | `…-windows-arm64.zip` | Windows 11 on ARM |
+| A Mac from 2020 or earlier | `…-macos-x64.zip` | macOS 11+ on Intel |
+| A Mac with Apple silicon (M1–M4) | `…-macos-arm64.zip` | macOS 11+ on Apple silicon |
+
+Not sure which Mac you have: **Apple menu → About This Mac**. "Chip: Apple
+M…" means arm64; "Processor: Intel…" means x64. On Windows: **Settings →
+System → About → System type**.
+
+Unzip, then:
+
+* **Windows** — open the folder and double-click **FestivalNet Scraper**.
+  The first launch shows *"Windows protected your PC"*, because the app is
+  not code-signed. Click **More info → Run anyway**.
+* **macOS** — drag **FestivalNet Scraper** to Applications, then
+  **right-click it → Open** the first time (double-clicking an unsigned
+  app just refuses). Confirm once and it opens normally after that.
+
+### From source
+
+```bash
+pip install -r requirements.txt
+python -m fnscraper gui             # or: python -m fnscraper.gui
+python -m fnscraper gui --sample    # open with a demo result set
+```
+
+`--sample` fills the window with invented listings scored by the real
+model, so you can see what everything does before spending a crawl on it.
+The window labels that session **SAMPLE DATA** and never writes it to the
+results file.
+
+The window needs Tk, which the python.org installers for Windows and macOS
+include. On Linux, install `python3-tk` (Debian/Ubuntu) or `python3-tkinter`
+(Fedora); without it the app says so and points you back at the CLI.
+
+## What is in the window
+
+**The rail on the left** is the search. Keyword, location, country, state,
+event type, a date range, and attendance bounds narrow what you are
+looking at; the four checkboxes decide whether dates and location are
+filters at all, whether a keyword has to match a whole word, and whether
+shows that have already happened stay on screen. **Scraping options** are
+the crawl itself — how many pages, how politely, how many at once, and
+which of the slow stages to run. **Organize & rank results by** reorders
+everything on screen.
+
+**The toolbar** starts and stops a crawl, exports, and opens the data
+folder. **Stop** ends the run at the next request; a cancelled crawl is
+discarded rather than saved half-finished.
+
+**Six tabs**: *Overview* (the headline numbers and the ranked table),
+*Table* (every column the scraper fills in), *Map* (each show plotted
+against home, with 5/10/15-hour drive rings), *Calendar* (which shows run
+on which days), *Charts*, and *Export*.
+
+<p align="center">
+  <img src="docs/desktop-map.png" width="49%" alt="Map tab">
+  <img src="docs/desktop-charts.png" width="49%" alt="Charts tab">
+</p>
+
+**The detail pane** under the table holds everything about the selected
+show across eight tabs — schedule, venue, the full financial breakdown,
+fees and deadlines, promoter contacts, what the model had to assume, and
+a raw dump of every field. Drag the bar above it to make it taller.
+
+**The status bar** shows the current stage, elapsed time, request and
+failure counts, and where the data is being written. Click the path to
+open that folder.
+
+## What the columns mean
+
+The scoring model is the same one the CLI uses, so the money columns are
+this project's vendor economics rather than generic listing data:
+
+| Column | Where it comes from |
+|--------|--------------------|
+| **Overall Score** | The ranking score, indexed 0–100 *against the current result set* — 100 is the best show in this list, 0 loses money |
+| **Attendance** | The listing's figure, or the fallback estimate when it publishes none |
+| **Booth Fee** | The real fee when a FestivalNet Pro login exposed it, otherwise the attendance-tier estimate |
+| **Est. Revenue** | Buyers × average order, from the price ladder |
+| **Est. Profit** | Revenue − cost of goods − booth fee − fuel − lodging − meals |
+| **Trip Cost** | Everything out of pocket for the trip (a Columns-menu extra) |
+| **Profit Potential** | Estimated profit, indexed 0–100 the same way |
+
+A leading `~` marks a number the scraper estimated rather than read —
+`~$630` is a tier estimate, `$630` is a quoted fee. Click any heading to
+sort by it; use **Columns** to add the dozen fields that are off by
+default.
+
+## Build all four yourself
+
+```bash
+pip install -r requirements-build.txt
+python packaging/build.py                    # this machine's platform + arch
+python packaging/build.py --target arm64     # macOS cross-build
+python packaging/build.py --dmg              # also roll a .dmg (macOS)
+```
+
+Each run writes an app folder and a zip into `dist/`. One caveat worth
+knowing before you plan a build: **Windows cannot cross-build.** A frozen
+app embeds the CPython and compiled extension modules of the machine that
+built it, so a Windows ARM64 app has to come off an ARM64 Windows machine.
+macOS can cross-build with `--target`, provided every wheel in the
+environment carries the slice you are asking for.
+
+`.github/workflows/desktop.yml` does all four on GitHub's runners —
+`windows-latest`, `windows-11-arm`, `macos-13` and `macos-14` — runs the
+test suite first, and attaches the zips to a draft release on a `v*` tag.
+The ARM64 Windows job is marked `continue-on-error`, so a repository
+without access to those runners still gets the other three.
+
+## Where it keeps things
+
+An installed app has no useful working directory, so it uses the
+platform's own locations instead of the checkout:
+
+| | Windows | macOS | Linux |
+|---|---------|-------|-------|
+| Settings | `%APPDATA%\FestivalNet Scraper` | `~/Library/Application Support/FestivalNet Scraper` | `~/.config/fnscraper` |
+| Page cache | `%LOCALAPPDATA%\FestivalNet Scraper\cache` | `~/Library/Caches/FestivalNet Scraper` | `~/.cache/fnscraper` |
+| Results and exports | `Documents\FestivalNet Scraper` | `~/Documents/FestivalNet Scraper` | `~/Documents/FestivalNet Scraper` |
+
+Running from a checkout keeps exports in `reports/` next to the code, the
+way the CLI does. Either way the Export tab lets you point somewhere else.
+
+The window remembers its search, its scraping options, its columns and its
+size between launches, and **Save Settings** / **Load Settings** write the
+same thing to a file you can hand to someone else.
 
 ---
 
@@ -621,3 +777,16 @@ python -m pytest tests/ -v
 Parser tests run against synthetic fixtures that mirror FestivalNet's
 schema.org markup; scoring tests pin the model's behavior (long drives add
 hotels, crowded shows rank lower, real fees override estimates, etc.).
+
+The desktop app is covered in two layers. `test_gui_viewmodel.py` and
+`test_gui_scrape.py` are plain unit tests over the filtering, ranking,
+pagination and settings-mapping code, and need no display.
+`test_gui_window.py` opens the real window and drives it — every tab,
+every ranking, search, paging, export, and a settings round trip. Those
+skip themselves when there is no display, so a headless checkout still
+runs green; to include them:
+
+```bash
+xvfb-run -a python -m pytest tests/ -v      # Linux
+python -m pytest tests/ -v                  # macOS/Windows, just run it
+```

@@ -21,3 +21,8 @@ windows/*.log
 
 # macOS folder metadata - never wanted in the Windows download.
 .DS_Store
+
+# Desktop-app build output (packaging/build.py).
+build/
+dist/
+*.egg-info/

@@ -72,6 +72,9 @@ class _FakeFetcher:
     def login(self, *a, **k):
         pass
 
+    def stats(self):
+        return {"requests": 0, "cache_hits": 0, "failures": 0}
+
 
 def test_pipeline_category_filter_skips_fairs(monkeypatch):
     listing = """

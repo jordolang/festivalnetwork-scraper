@@ -24,6 +24,7 @@ class Fetcher:
         refresh: bool = False,
         cache_ttl_hours: float = config.CACHE_TTL_HOURS,
         workers: int = 1,
+        max_retries: int = 3,
     ):
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -41,6 +42,29 @@ class Fetcher:
         self.session = requests.Session()
         self.session.headers["User-Agent"] = config.USER_AGENT
         self.logged_in = False
+        # A request that fails is retried this many times before giving up.
+        # 1 means "try once, don't retry" — what the desktop app's "Retry
+        # failed requests" toggle turns the crawl into when it is off.
+        self.max_retries = max(1, max_retries)
+        # Counters for progress reporting.  Written from worker threads, so
+        # they go through a lock; read them with `stats()`.
+        self._counter_lock = threading.Lock()
+        self.requests = 0        # requests that actually hit the network
+        self.cache_hits = 0      # pages served from the disk cache
+        self.failures = 0        # requests that gave up after retrying
+
+    def _count(self, field: str) -> None:
+        with self._counter_lock:
+            setattr(self, field, getattr(self, field) + 1)
+
+    def stats(self) -> dict[str, int]:
+        """A snapshot of the request counters, safe to read mid-crawl."""
+        with self._counter_lock:
+            return {
+                "requests": self.requests,
+                "cache_hits": self.cache_hits,
+                "failures": self.failures,
+            }
 
     # -- caching ------------------------------------------------------
     def _cache_path(self, url: str) -> Path:
@@ -87,27 +111,34 @@ class Fetcher:
         """Fetch a URL, using the disk cache when fresh."""
         cached = self._read_cache(url)
         if cached is not None:
+            self._count("cache_hits")
             return cached
         self._throttle()
-        for attempt in range(3):
+        last = self.max_retries - 1
+        for attempt in range(self.max_retries):
             try:
+                self._count("requests")
                 resp = self.session.get(url, timeout=config.REQUEST_TIMEOUT)
                 if resp.status_code == 200:
                     self._write_cache(url, resp.text)
                     return resp.text
-                if resp.status_code in (429, 500, 502, 503, 504):
+                if resp.status_code in (429, 500, 502, 503, 504) and attempt < last:
                     wait = 5 * (attempt + 1)
                     log.warning("HTTP %s for %s; retrying in %ss", resp.status_code, url, wait)
                     time.sleep(wait)
                     continue
+                # Raises for 4xx/5xx; the retry handler below counts it.
                 resp.raise_for_status()
                 # Non-retryable non-200 (e.g. 202 bot challenge): give up now.
+                self._count("failures")
                 raise RuntimeError(f"HTTP {resp.status_code} for {url}")
             except requests.RequestException as exc:
-                if attempt == 2:
+                if attempt == last:
+                    self._count("failures")
                     raise
                 log.warning("Request error for %s (%s); retrying", url, exc)
                 time.sleep(5 * (attempt + 1))
+        self._count("failures")
         raise RuntimeError(f"Failed to fetch {url} after retries")
 
     def get_bytes(self, url: str, max_bytes: int = 30_000_000) -> bytes:

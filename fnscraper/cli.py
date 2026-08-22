@@ -51,9 +51,9 @@ def build_parser() -> argparse.ArgumentParser:
             "festivalnet.com listings."
         ),
         epilog=(
-            "Subcommands: setup (configure this business), best (one-button "
-            "weekend booking plan), apply (download and fill in vendor "
-            "applications)."
+            "Subcommands: gui (open the desktop window), setup (configure "
+            "this business), best (one-button weekend booking plan), apply "
+            "(download and fill in vendor applications)."
         ),
     )
     p.add_argument("--weeks", type=int, default=8,
@@ -322,6 +322,9 @@ def main(argv: list[str] | None = None) -> int:
     if argv[:1] == ["setup"]:
         from . import setup_wizard
         return setup_wizard.main(argv[1:])
+    if argv[:1] == ["gui"]:
+        from . import gui
+        return gui.main(argv[1:])
     args = build_parser().parse_args(argv)
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
