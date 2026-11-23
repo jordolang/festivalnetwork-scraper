@@ -792,22 +792,32 @@ class TabBar(tk.Frame):
 
 
 class Deck(tk.Frame):
-    """Holds one frame per tab and raises the active one."""
+    """Holds one frame per tab and shows only the active one.
+
+    Hidden pages are unmapped, not merely stacked underneath: a stacked
+    page still gets every resize, and each of its canvases (map, calendar,
+    charts, the full table) repainted on every step of a window drag.
+    """
 
     def __init__(self, parent: tk.Misc, *, bg: str = t.BG, **kw):
         super().__init__(parent, bg=bg, **kw)
         self.pages: dict[str, tk.Frame] = {}
+        self.active: str | None = None
         self._bg = bg
 
     def page(self, key: str) -> tk.Frame:
         if key not in self.pages:
-            frame = tk.Frame(self, bg=self._bg)
-            frame.place(relx=0, rely=0, relwidth=1, relheight=1)
-            self.pages[key] = frame
+            self.pages[key] = tk.Frame(self, bg=self._bg)
         return self.pages[key]
 
     def show(self, key: str):
-        self.page(key).lift()
+        shown = self.page(key)
+        for other_key, frame in self.pages.items():
+            if other_key != key:
+                frame.place_forget()
+        shown.place(relx=0, rely=0, relwidth=1, relheight=1)
+        shown.lift()
+        self.active = key
 
 
 class StatCard(tk.Frame):

@@ -18,6 +18,7 @@ from .widgets import bind_wheel
 from .viewmodel import COLUMN_BY_KEY, Row, column_title
 
 ROW_HEIGHT = 32
+MEASURE_CACHE_LIMIT = 20_000
 HEADER_HEIGHT = 52
 CELL_PAD = 10
 
@@ -60,6 +61,12 @@ class DataGrid(tk.Frame):
 
         self._body_font = None
         self._bold_font = None
+        # Text widths, per font.  Every ``Font.measure`` is a round trip
+        # into Tk (and, on macOS, into Core Text), and a redraw used to
+        # make hundreds of them for strings it had measured the last time
+        # round — header words, the same "$1,250" fee, a name being elided
+        # one character at a time.  That was most of the cost of a keystroke.
+        self._widths_cache: dict[tuple[int, str], float] = {}
         # Packing a scrollbar resizes the canvas, which fires <Configure>,
         # which redraws and re-evaluates the scrollbar.  Remember what is
         # already on screen so that loop settles after one pass.
@@ -81,6 +88,15 @@ class DataGrid(tk.Frame):
             self._body_font = tkfont.Font(font=t.UI_SMALL)
             self._bold_font = tkfont.Font(font=t.UI_SMALL_BOLD)
         return self._body_font, self._bold_font
+
+    def _measure(self, font, text: str) -> float:
+        key = (id(font), text)
+        width = self._widths_cache.get(key)
+        if width is None:
+            if len(self._widths_cache) >= MEASURE_CACHE_LIMIT:
+                self._widths_cache.clear()
+            width = self._widths_cache[key] = font.measure(text)
+        return width
 
     # -- data ----------------------------------------------------------
     def set_columns(self, columns: Sequence[str]):
@@ -144,11 +160,11 @@ class DataGrid(tk.Frame):
         still recognisable.
         """
         body, bold = self._fonts()
-        longest = max((bold.measure(word)
+        longest = max((self._measure(bold, word)
                        for word in column_title(key).split()), default=40)
         if COLUMN_BY_KEY[key].numeric and self.rows:
-            longest = max(longest,
-                          max(body.measure(row.text(key)) for row in self.rows))
+            longest = max(longest, max(self._measure(body, row.text(key))
+                                       for row in self.rows))
         return longest + 2 * CELL_PAD + 6
 
     def _layout(self) -> list[float]:
@@ -198,12 +214,19 @@ class DataGrid(tk.Frame):
         return widths
 
     def _elide(self, text: str, font, width: float) -> str:
-        if font.measure(text) <= width:
+        if self._measure(font, text) <= width:
             return text
+        # The longest prefix that fits with an ellipsis, found by bisection:
+        # a handful of measurements instead of one per character dropped.
         ellipsis = "…"
-        while text and font.measure(text + ellipsis) > width:
-            text = text[:-1]
-        return text.rstrip() + ellipsis
+        low, high = 0, len(text)
+        while low < high:
+            middle = (low + high + 1) // 2
+            if self._measure(font, text[:middle] + ellipsis) <= width:
+                low = middle
+            else:
+                high = middle - 1
+        return text[:low].rstrip() + ellipsis
 
     # -- painting ------------------------------------------------------
     def redraw(self):
@@ -245,9 +268,9 @@ class DataGrid(tk.Frame):
             self.canvas.configure(scrollregion=(0, 0, total_width, 120))
             return
 
+        wide = max(total_width, self.canvas.winfo_width())
         for index, row in enumerate(self.rows):
             top = index * ROW_HEIGHT
-            wide = max(total_width, self.canvas.winfo_width())
             background = self.canvas.create_rectangle(
                 0, top, wide, top + ROW_HEIGHT,
                 fill=self._row_bg(index, row), outline="",
@@ -276,9 +299,9 @@ class DataGrid(tk.Frame):
         if anchor == "e":
             ax = tx + 4
         elif anchor == "center":
-            ax = tx + bold_font.measure(column_title(self.sort_column)) / 2 + 6
+            ax = tx + self._measure(bold_font, column_title(self.sort_column)) / 2 + 6
         else:
-            ax = tx + bold_font.measure(column_title(self.sort_column)) + 6
+            ax = tx + self._measure(bold_font, column_title(self.sort_column)) + 6
         ax = min(ax, x + width - 6)
         cy = HEADER_HEIGHT / 2
         if self.sort_descending:

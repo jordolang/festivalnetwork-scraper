@@ -67,6 +67,9 @@ class DetailPane(tk.Frame):
         # the grid that produced it, and the two never agree.
         self._wrapped: list[tuple[tk.Label, float, int]] = []
         self._last_width = 0
+        # Tabs drawn for the current row.  Only the tab on screen is built
+        # when the selection changes; the others are built if opened.
+        self._built: set[str] = set()
         self.bind("<Configure>", self._on_resize)
         self.show_empty()
 
@@ -103,29 +106,39 @@ class DetailPane(tk.Frame):
         where = ", ".join(x for x in (event.city, event.state) if x)
         self.badge.configure(text=f"— {where}  ·  {row.text('dates')}")
         self._render()
-        self.deck.show(self.tabs.active)
 
     def show_empty(self):
         self.title.configure(text="No festival selected")
         self.badge.configure(text="— pick a row above to see everything "
                                   "the scraper found")
+        self._built.clear()
         for body in self._bodies.values():
             for child in body.body.winfo_children():
                 child.destroy()
 
     # -- rendering -----------------------------------------------------
     def _show(self, key: str):
+        if self.row is not None:
+            self._build(key)
         self.deck.show(key)
 
     def _render(self):
+        """A new row: clear every tab, then draw just the visible one."""
         self._wrapped.clear()
         self._last_width = self.winfo_width()
+        self._built.clear()
         for key, _label in TABS:
-            body = self._bodies[key].body
-            for child in body.winfo_children():
+            for child in self._bodies[key].body.winfo_children():
                 child.destroy()
-            getattr(self, f"_build_{key}")(body)
-            self._bodies[key].bind_wheel_to(body)
+        self._show(self.tabs.active)
+
+    def _build(self, key: str):
+        if key in self._built:
+            return
+        self._built.add(key)
+        body = self._bodies[key].body
+        getattr(self, f"_build_{key}")(body)
+        self._bodies[key].bind_wheel_to(body)
 
     # -- individual tabs -----------------------------------------------
     def _build_overview(self, parent: tk.Frame):

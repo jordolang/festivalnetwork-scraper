@@ -400,3 +400,113 @@ def test_cloud_placeholder_detection(tmp_path, monkeypatch):
     monkeypatch.setattr(os, "stat", lambda _p: types.SimpleNamespace(
         st_flags=paths.SF_DATALESS))
     assert paths.is_cloud_placeholder(plain)
+
+
+# ---------------------------------------------------------------------------
+# responsiveness: work the window must *not* do
+# ---------------------------------------------------------------------------
+
+def test_typing_a_word_refilters_once_not_per_letter(window, monkeypatch):
+    calls = []
+    real = window._refresh
+    monkeypatch.setattr(window, "_refresh",
+                        lambda *a, **k: (calls.append(1), real(*a, **k)))
+    text = ""
+    for letter in "harvest":
+        text += letter
+        window.keyword.set(text)
+        window.update()
+    assert calls == []                        # still waiting for a pause
+    assert _wait_for(window, lambda: window._refresh_job is None, 2.0)
+    assert len(calls) == 1
+    assert all(vm.Filters(keyword="harvest").matches(r) for r in window.rows)
+
+
+def test_the_results_search_box_waits_for_a_pause_too(window):
+    before = len(window.rows)
+    window.search.set("salsa")
+    window.update()
+    assert len(window.rows) == before
+    assert _wait_for(window, lambda: len(window.rows) < before, 2.0)
+
+
+def test_hidden_tabs_are_drawn_when_opened_not_on_every_change(window, monkeypatch):
+    drawn = []
+    monkeypatch.setattr(window.map_panel, "set_rows",
+                        lambda rows: drawn.append(len(rows)))
+    window._on_search("salsa")
+    window._on_search("")
+    window.update()
+    assert drawn == []                         # map is not on screen
+    window.tabs.select("map")
+    window.update()
+    assert drawn == [len(window.rows)]
+    window.tabs.select("map")                  # nothing changed since
+    assert drawn == [len(window.rows)]
+
+
+def test_a_hidden_page_is_unmapped_so_resizes_skip_it(window):
+    window.tabs.select("overview")
+    window.update()
+    assert window.deck.pages["overview"].winfo_ismapped()
+    assert not window.deck.pages["map"].winfo_ismapped()
+    window.tabs.select("map")
+    window.update()
+    assert window.deck.pages["map"].winfo_ismapped()
+    assert not window.deck.pages["overview"].winfo_ismapped()
+
+
+def test_turning_a_page_does_not_redraw_the_map(window, monkeypatch):
+    window.tabs.select("map")
+    window.update()
+    drawn = []
+    monkeypatch.setattr(window.map_panel, "set_rows",
+                        lambda rows: drawn.append(len(rows)))
+    window._go_to_page(2)
+    window.update()
+    assert drawn == []
+
+
+def test_the_detail_pane_builds_only_the_tab_on_screen(window):
+    detail = window.detail
+    window._select_row(window.rows[1])
+    window.update()
+    assert detail._built == {detail.tabs.active}
+    other = next(key for key, _ in DETAIL_TABS if key != detail.tabs.active)
+    assert detail._bodies[other].body.winfo_children() == []
+    detail.tabs.select(other)
+    window.update()
+    assert other in detail._built
+    assert detail._bodies[other].body.winfo_children() != []
+
+
+def test_elision_matches_dropping_one_letter_at_a_time(window):
+    """Bisection must land on what the old one-character loop produced."""
+    grid = window.grid_view
+    font, _bold = grid._fonts()
+
+    def one_at_a_time(text, width):
+        if font.measure(text) <= width:
+            return text
+        while text and font.measure(text + "…") > width:
+            text = text[:-1]
+        return text.rstrip() + "…"
+
+    for text in ("The Extremely Long Annual Harvest Festival Of Many Words",
+                 "$17,098", "Short", "https://festivalnet.com/a/very/long/url"):
+        for width in (5, 40, 90, 150, 400):
+            assert grid._elide(text, font, width) == one_at_a_time(text, width)
+
+
+def test_closing_with_a_refresh_pending_raises_nothing(display_available,
+                                                       tmp_path, monkeypatch):
+    from fnscraper.gui import app as app_module, paths
+
+    monkeypatch.setattr(paths, "default_output_dir", lambda: tmp_path / "out")
+    monkeypatch.setattr(paths, "cache_dir", lambda: tmp_path / "cache")
+    monkeypatch.setattr(paths, "settings_file", lambda: tmp_path / "s.json")
+    win = app_module.ScraperWindow(sample=True)
+    win.update()
+    win.keyword.set("fair")
+    assert win._refresh_job is not None
+    win.destroy()                              # must cancel, not fire later
