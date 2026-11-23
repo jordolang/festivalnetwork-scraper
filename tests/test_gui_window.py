@@ -304,3 +304,99 @@ def test_clearing_results_empties_every_panel(window):
     assert window.grid_view.rows == []
     assert window.detail.row is None
     assert window.results_title.cget("text") == "Results (0 festivals)"
+
+
+def _wait_for(window, predicate, seconds=10.0):
+    import time
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        window.update()
+        if predicate():
+            return True
+        time.sleep(0.02)
+    return False
+
+
+@pytest.fixture
+def stalled_read(display_available, tmp_path, monkeypatch):
+    """A saved results file whose read blocks, like an iCloud placeholder.
+
+    macOS evicts files in an iCloud-synced Documents folder; reading one
+    blocks in read() until the download finishes.  Startup used to do that
+    read on the Tk thread, so the window never appeared.
+    """
+    import threading
+
+    from fnscraper import persist
+    from fnscraper.gui import demo, paths, scrape
+
+    out = tmp_path / "out"
+    monkeypatch.setattr(paths, "default_output_dir", lambda: out)
+    monkeypatch.setattr(paths, "cache_dir", lambda: tmp_path / "cache")
+    monkeypatch.setattr(paths, "settings_file",
+                        lambda: tmp_path / "settings.json")
+    saved = persist.save_results(demo.sample_results(),
+                                 scrape.default_results_path(out))
+    release = threading.Event()
+    real_load = persist.load_results
+
+    def slow_load(path):
+        release.wait(30)
+        return real_load(path)
+
+    monkeypatch.setattr(persist, "load_results", slow_load)
+    yield saved, release
+    release.set()
+
+
+def test_window_opens_while_saved_results_are_still_downloading(stalled_read):
+    import time
+
+    from fnscraper.gui import app as app_module
+
+    _saved, release = stalled_read
+    started = time.monotonic()
+    win = app_module.ScraperWindow()
+    try:
+        win.update()
+        assert time.monotonic() - started < 5, "window blocked on the read"
+        assert win.all_rows == []
+        assert "Loading saved results" in win.status.cget("text")
+        release.set()
+        assert _wait_for(win, lambda: len(win.all_rows) > 20)
+    finally:
+        win.destroy()
+
+
+def test_a_slow_load_never_overwrites_newer_results(stalled_read):
+    from fnscraper.gui import app as app_module
+
+    _saved, release = stalled_read
+    win = app_module.ScraperWindow()
+    try:
+        win.update()
+        win.load_sample()
+        sample_count = len(win.all_rows)
+        release.set()
+        _wait_for(win, lambda: win._loads.empty(), seconds=3)
+        for _ in range(20):
+            win.update()
+        assert win.sample_data is True
+        assert len(win.all_rows) == sample_count
+    finally:
+        win.destroy()
+
+
+def test_cloud_placeholder_detection(tmp_path, monkeypatch):
+    import os
+    import types
+
+    from fnscraper.gui import paths
+
+    plain = tmp_path / "results.json"
+    plain.write_text("{}")
+    assert not paths.is_cloud_placeholder(plain)
+    assert not paths.is_cloud_placeholder(tmp_path / "missing.json")
+    monkeypatch.setattr(os, "stat", lambda _p: types.SimpleNamespace(
+        st_flags=paths.SF_DATALESS))
+    assert paths.is_cloud_placeholder(plain)

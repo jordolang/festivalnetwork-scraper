@@ -9,6 +9,8 @@ show is selected.
 from __future__ import annotations
 
 import json
+import queue
+import threading
 import tkinter as tk
 import webbrowser
 from datetime import date, datetime
@@ -61,6 +63,11 @@ class ScraperWindow(tk.Tk):
         self.results_path: Path | None = None
         self.last_progress = scrape.Progress()
         self.controller = scrape.ScrapeController(self._on_scrape_event)
+        # Saved results are read off the Tk thread: the file can sit in an
+        # iCloud-synced Documents folder, where a read blocks until macOS
+        # downloads it, and the window has to stay alive meanwhile.
+        self._loads: queue.Queue = queue.Queue()
+        self._load_token = 0
 
         self.output_dir = paths.default_output_dir()
         self.cache_root = paths.cache_dir()
@@ -81,7 +88,7 @@ class ScraperWindow(tk.Tk):
         self._restore_settings()
         self.after(120, self._pump)
         if results_file is not None:
-            self.load_results_file(results_file)
+            self.load_results_in_background(results_file)
         elif sample:
             self.load_sample()
         else:
@@ -566,6 +573,7 @@ class ScraperWindow(tk.Tk):
             self.grid_view.select_key(self.rows[0].key, notify=False)
 
     def clear_results(self):
+        self._supersede_pending_load()
         self.all_rows = []
         self.sample_data = False
         self.sample_badge.configure(text="")
@@ -719,6 +727,7 @@ class ScraperWindow(tk.Tk):
         results_path = scrape.default_results_path(self.output_dir)
         if not self.controller.start(settings, results_path):
             return
+        self._supersede_pending_load()
         self.start_button.set_enabled(False)
         self.stop_button.set_enabled(True)
         self.sample_badge.configure(text="")
@@ -737,6 +746,7 @@ class ScraperWindow(tk.Tk):
 
     def _pump(self):
         self.controller.drain()
+        self._drain_loads()
         if self.controller.running:
             self.time_label.configure(
                 text=f"Total Time: {scrape.format_elapsed(self.controller.elapsed)}")
@@ -815,6 +825,7 @@ class ScraperWindow(tk.Tk):
     # files
     # ------------------------------------------------------------------
     def load_sample(self):
+        self._supersede_pending_load()
         self.set_results(demo.sample_results(), sample=True)
         self.set_status(
             "Loaded a sample result set — invented listings, real scoring "
@@ -832,10 +843,56 @@ class ScraperWindow(tk.Tk):
                         t.GREEN)
         return True
 
+    def load_results_in_background(self, path: Path):
+        """Read a results file on a worker thread, then show it.
+
+        Anything that replaces the results meanwhile (a scrape, the sample
+        set, Clear) supersedes the load, so a slow read never clobbers
+        newer data.
+        """
+        from .. import persist
+        path = Path(path)
+        self._load_token += 1
+        token = self._load_token
+        if paths.is_cloud_placeholder(path):
+            self.set_status(
+                f"Downloading your saved results from iCloud ({path.name})… "
+                "the app is usable meanwhile.", t.AMBER)
+        else:
+            self.set_status(f"Loading saved results from {path}…", t.FG)
+
+        def work():
+            try:
+                outcome: Any = persist.load_results(path)
+            except Exception as exc:          # noqa: BLE001 - shown to user
+                outcome = exc
+            self._loads.put((token, path, outcome))
+
+        threading.Thread(target=work, name="load-results", daemon=True).start()
+
+    def _supersede_pending_load(self):
+        self._load_token += 1
+
+    def _drain_loads(self):
+        while True:
+            try:
+                token, path, outcome = self._loads.get_nowait()
+            except queue.Empty:
+                return
+            if token != self._load_token:
+                continue                      # replaced by newer results
+            self._load_token += 1
+            if isinstance(outcome, Exception):
+                self.set_status(f"Could not read {path}: {outcome}", t.RED)
+                continue
+            self.set_results(outcome, sample=False, source=path)
+            self.set_status(
+                f"Loaded {len(outcome):,} saved events from {path}.", t.GREEN)
+
     def _autoload_last_results(self):
         saved = scrape.default_results_path(self.output_dir)
         if saved.is_file():
-            self.load_results_file(saved)
+            self.load_results_in_background(saved)
         else:
             self.set_status("Ready to scrape.")
 
@@ -846,7 +903,7 @@ class ScraperWindow(tk.Tk):
             filetypes=[("Saved results", "*.json"), ("All files", "*.*")],
         )
         if chosen:
-            self.load_results_file(Path(chosen))
+            self.load_results_in_background(Path(chosen))
 
     def _save_results_as(self):
         from .. import persist

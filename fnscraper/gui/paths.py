@@ -77,6 +77,22 @@ def settings_file() -> Path:
     return config_dir() / "window-settings.json"
 
 
+# st_flags bit macOS sets on a file whose contents live only in the cloud
+# (iCloud Drive with "Optimize Mac Storage", or any File Provider).  Reading
+# such a file blocks inside read() until the download finishes — which can
+# be minutes, or never if syncing is stuck.
+SF_DATALESS = 0x40000000
+
+
+def is_cloud_placeholder(path: Path) -> bool:
+    """True when *path* exists but its bytes have not been downloaded."""
+    try:
+        flags = getattr(os.stat(path), "st_flags", 0)
+    except OSError:
+        return False
+    return bool(flags & SF_DATALESS)
+
+
 def ensure(path: Path) -> Path:
     path.mkdir(parents=True, exist_ok=True)
     return path
