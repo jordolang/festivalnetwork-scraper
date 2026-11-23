@@ -20,7 +20,7 @@ from typing import Any
 
 from .. import __version__, categories, config
 from ..models import ScoredEvent
-from . import demo, icons, paths, places, scrape, theme as t, viewmodel as vm
+from . import icons, paths, places, scrape, theme as t, viewmodel as vm
 from .detail import DetailPane
 from .grid import DataGrid
 from .panels import CalendarPanel, ChartsPanel, ExportPanel, MapPanel, open_folder
@@ -40,6 +40,15 @@ RESULT_TABS = (
 SIDEBAR_WIDTH = 312
 DETAIL_HEIGHT = 300
 DATE_FORMAT = "%m/%d/%Y"
+# Typing waits this long for the next key before re-filtering, so a word
+# costs one refresh rather than one per letter.
+TYPING_DEBOUNCE_MS = 180
+# How often the window checks on a scrape or a file load, and how often
+# it looks when neither is happening.
+PUMP_BUSY_MS = 150
+PUMP_IDLE_MS = 600
+# Result views that are redrawn only while their tab is showing.
+LAZY_VIEWS = ("overview", "table", "map", "calendar", "charts")
 
 
 class ScraperWindow(tk.Tk):
@@ -68,6 +77,10 @@ class ScraperWindow(tk.Tk):
         # downloads it, and the window has to stay alive meanwhile.
         self._loads: queue.Queue = queue.Queue()
         self._load_token = 0
+        self._loads_in_flight = 0
+        self._refresh_job: str | None = None
+        self._pump_job: str | None = None
+        self._stale: set[str] = set(LAZY_VIEWS)
 
         self.output_dir = paths.default_output_dir()
         self.cache_root = paths.cache_dir()
@@ -86,7 +99,7 @@ class ScraperWindow(tk.Tk):
         self.bind("<Control-e>", lambda _e: self._export_all())
 
         self._restore_settings()
-        self.after(120, self._pump)
+        self._pump_job = self.after(120, self._pump)
         if results_file is not None:
             self.load_results_in_background(results_file)
         elif sample:
@@ -187,11 +200,11 @@ class ScraperWindow(tk.Tk):
         self.keyword = self._labelled_field(
             body, "Keyword / Event Name",
             TextField(body, placeholder="e.g. craft, harvest, salsa",
-                      on_change=lambda _v: self._refresh(reset_page=True)))
+                      on_change=lambda _v: self._refresh_soon()))
         self.location = self._labelled_field(
             body, "Location",
             TextField(body, placeholder="City, State or ZIP",
-                      on_change=lambda _v: self._refresh(reset_page=True)))
+                      on_change=lambda _v: self._refresh_soon()))
 
         self.country = self._labelled_field(
             body, "Country",
@@ -214,13 +227,13 @@ class ScraperWindow(tk.Tk):
         dates.pack(fill="x", padx=pad)
         self.date_from = TextField(
             dates, value=start.strftime(DATE_FORMAT), width=9,
-            on_change=lambda _v: self._refresh(reset_page=True))
+            on_change=lambda _v: self._refresh_soon())
         self.date_from.pack(side="left", fill="x", expand=True)
         tk.Label(dates, text="to", bg=t.BG_SIDEBAR, fg=t.FG_MUTED,
                  font=t.UI_SMALL).pack(side="left", padx=5)
         self.date_to = TextField(
             dates, value=end.strftime(DATE_FORMAT), width=9,
-            on_change=lambda _v: self._refresh(reset_page=True))
+            on_change=lambda _v: self._refresh_soon())
         self.date_to.pack(side="left", fill="x", expand=True)
 
         FieldLabel(body, "Min / Max Attendance").pack(
@@ -229,13 +242,13 @@ class ScraperWindow(tk.Tk):
         attendance.pack(fill="x", padx=pad)
         self.min_attendance = TextField(
             attendance, placeholder="Min", width=8,
-            on_change=lambda _v: self._refresh(reset_page=True))
+            on_change=lambda _v: self._refresh_soon())
         self.min_attendance.pack(side="left", fill="x", expand=True)
         tk.Label(attendance, text="–", bg=t.BG_SIDEBAR, fg=t.FG_MUTED,
                  font=t.UI_SMALL).pack(side="left", padx=5)
         self.max_attendance = TextField(
             attendance, placeholder="Max", width=8,
-            on_change=lambda _v: self._refresh(reset_page=True))
+            on_change=lambda _v: self._refresh_soon())
         self.max_attendance.pack(side="left", fill="x", expand=True)
 
         toggles = tk.Frame(body, bg=t.BG_SIDEBAR)
@@ -449,7 +462,7 @@ class ScraperWindow(tk.Tk):
         self.columns_button.pack(side="right")
         self.search = TextField(controls, placeholder="Search results…",
                                 icon="search", width=26,
-                                on_change=self._on_search)
+                                on_change=self._on_search_typed)
         self.search.pack(side="right", padx=8)
 
         table_frame = tk.Frame(parent, bg=t.BG, highlightthickness=1,
@@ -581,9 +594,22 @@ class ScraperWindow(tk.Tk):
         self._refresh(reset_page=True)
         self.set_status("Cleared.")
 
+    def _refresh_soon(self):
+        """Re-filter once typing pauses, instead of on every keystroke."""
+        if self._refresh_job is not None:
+            self.after_cancel(self._refresh_job)
+        self._refresh_job = self.after(TYPING_DEBOUNCE_MS, self._refresh_typed)
+
+    def _refresh_typed(self):
+        self._refresh_job = None
+        self._refresh(reset_page=True)
+
     def _refresh(self, reset_page: bool = False):
         if not hasattr(self, "grid_view"):
             return
+        if self._refresh_job is not None:     # this refresh supersedes it
+            self.after_cancel(self._refresh_job)
+            self._refresh_job = None
         rows = self.filters().apply(self.all_rows)
         if self.search_text:
             needle = self.search_text.lower()
@@ -606,26 +632,44 @@ class ScraperWindow(tk.Tk):
                                                 vm.cards_for(summary)):
             card.update_value(value, label)
 
-        page_rows = vm.page_slice(rows, self.page, self.page_size)
-        self.grid_view.set_rows(page_rows)
-        self.pager.render(self.page, pages)
-        self.page_label.configure(
-            text=vm.page_range_text(len(rows), self.page, self.page_size))
+        # Only the tab on screen is redrawn now; the rest catch up when
+        # they are next shown.  Drawing all five on every keystroke —
+        # 1,600 map dots, a calendar, the charts and two tables — was
+        # where the time went.
+        self._stale = set(LAZY_VIEWS)
+        self._render_view(self.tabs.active)
 
-        table_rows = vm.page_slice(rows, self.page, self.page_size)
-        self.table_view.set_rows(table_rows)
-        self.table_pager.render(self.page, pages)
-        self.table_page_label.configure(
-            text=vm.page_range_text(len(rows), self.page, self.page_size))
-
-        self.map_panel.set_rows(rows)
-        self.calendar_panel.set_rows(rows)
-        self.charts_panel.set_rows(rows)
+    def _render_view(self, key: str):
+        if key not in self._stale:
+            return
+        self._stale.discard(key)
+        rows = self.rows
+        pages = vm.page_count(len(rows), self.page_size)
+        if key == "overview":
+            self.grid_view.set_rows(vm.page_slice(rows, self.page, self.page_size))
+            self.pager.render(self.page, pages)
+            self.page_label.configure(
+                text=vm.page_range_text(len(rows), self.page, self.page_size))
+        elif key == "table":
+            self.table_view.set_rows(vm.page_slice(rows, self.page, self.page_size))
+            self.table_pager.render(self.page, pages)
+            self.table_page_label.configure(
+                text=vm.page_range_text(len(rows), self.page, self.page_size))
+        elif key == "map":
+            self.map_panel.set_rows(rows)
+        elif key == "calendar":
+            self.calendar_panel.set_rows(rows)
+        elif key == "charts":
+            self.charts_panel.set_rows(rows)
 
     # -- control callbacks ---------------------------------------------
     def _on_search(self, text: str):
         self.search_text = text
         self._refresh(reset_page=True)
+
+    def _on_search_typed(self, text: str):
+        self.search_text = text
+        self._refresh_soon()
 
     def _on_sorted_by(self, order: str):
         self.sort_order = order
@@ -645,8 +689,14 @@ class ScraperWindow(tk.Tk):
         self._refresh(reset_page=True)
 
     def _go_to_page(self, page: int):
-        self.page = page
-        self._refresh()
+        self.page = vm.clamp_page(page, vm.page_count(len(self.rows),
+                                                      self.page_size))
+        self._repage()
+
+    def _repage(self):
+        """Show another page of the same results: only the tables change."""
+        self._stale |= {"overview", "table"}
+        self._render_view(self.tabs.active)
 
     def _on_grid_select(self, row: vm.Row | None):
         self.detail.set_row(row)
@@ -660,13 +710,16 @@ class ScraperWindow(tk.Tk):
         """Selection coming from the map or the calendar."""
         index = next((i for i, r in enumerate(self.rows) if r.key == row.key), None)
         if index is not None:
-            self.page = index // self.page_size + 1
-            self._refresh()
+            page = index // self.page_size + 1
+            if page != self.page:
+                self.page = page
+                self._repage()
         self.grid_view.select_key(row.key, notify=False)
         self.table_view.select_key(row.key, notify=False)
         self.detail.set_row(row)
 
     def _on_tab_change(self, key: str):
+        self._render_view(key)          # before it is shown: no stale flash
         self.deck.show(key)
         # Map, charts and export want the whole window; the tables want
         # their detail pane.
@@ -683,7 +736,8 @@ class ScraperWindow(tk.Tk):
         if scope == "all":
             return list(self.all_rows)
         if scope == "selected":
-            row = self.grid_view.selected_row() or self.table_view.selected_row()
+            row = (self.grid_view.selected_row() or self.table_view.selected_row()
+                   or self.detail.row)
             return [row] if row else []
         return list(self.rows)
 
@@ -736,6 +790,7 @@ class ScraperWindow(tk.Tk):
         self._show_counters({})
         self.time_label.configure(text="Total Time: 00:00:00")
         self._draw_progress(0.0)
+        self._pump_now()
 
     def _stop_scrape(self):
         if not self.controller.running:
@@ -755,7 +810,15 @@ class ScraperWindow(tk.Tk):
             # go a minute between ticks, and a status bar frozen at the
             # last count reads as a hung crawl.
             self._show_counters(self.controller.stats())
-        self.after(150, self._pump)
+        busy = self.controller.running or self._loads_in_flight
+        self._pump_job = self.after(PUMP_BUSY_MS if busy else PUMP_IDLE_MS,
+                                    self._pump)
+
+    def _pump_now(self):
+        """Check the queues straight away rather than at the idle pace."""
+        if self._pump_job is not None:
+            self.after_cancel(self._pump_job)
+        self._pump_job = self.after(PUMP_BUSY_MS, self._pump)
 
     def _on_scrape_event(self, kind: str, payload: Any):
         if kind == scrape.PROGRESS:
@@ -826,6 +889,7 @@ class ScraperWindow(tk.Tk):
     # ------------------------------------------------------------------
     def load_sample(self):
         self._supersede_pending_load()
+        from . import demo        # pulls in the HTTP stack; not needed to open
         self.set_results(demo.sample_results(), sample=True)
         self.set_status(
             "Loaded a sample result set — invented listings, real scoring "
@@ -868,7 +932,9 @@ class ScraperWindow(tk.Tk):
                 outcome = exc
             self._loads.put((token, path, outcome))
 
+        self._loads_in_flight += 1
         threading.Thread(target=work, name="load-results", daemon=True).start()
+        self._pump_now()
 
     def _supersede_pending_load(self):
         self._load_token += 1
@@ -879,6 +945,7 @@ class ScraperWindow(tk.Tk):
                 token, path, outcome = self._loads.get_nowait()
             except queue.Empty:
                 return
+            self._loads_in_flight = max(0, self._loads_in_flight - 1)
             if token != self._load_token:
                 continue                      # replaced by newer results
             self._load_token += 1
@@ -1086,6 +1153,16 @@ class ScraperWindow(tk.Tk):
             self.controller.stop()
         self._persist_settings()
         self.destroy()
+
+    def destroy(self):
+        for job in (self._refresh_job, self._pump_job):
+            if job is not None:
+                try:
+                    self.after_cancel(job)
+                except tk.TclError:
+                    pass
+        self._refresh_job = self._pump_job = None
+        super().destroy()
 
 
 _STAGE_LABELS = {
