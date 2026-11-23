@@ -35,18 +35,31 @@ def save_results(scored: list[ScoredEvent], path: str | Path) -> Path:
     return path
 
 
+def _known(cls, data: dict) -> dict:
+    """Drop keys *cls* does not define.
+
+    A results file can come from another build of the app — one that
+    scores with extra fields (stock limits, say).  Refusing the whole file
+    over a column this build does not show leaves the window empty, so
+    unknown keys are ignored instead.
+    """
+    names = {f.name for f in dataclasses.fields(cls)}
+    return {k: v for k, v in data.items() if k in names}
+
+
 def load_results(path: str | Path) -> list[ScoredEvent]:
-    payload = json.loads(Path(path).read_text())
+    payload = json.loads(Path(path).read_text(encoding="utf-8"))
     out: list[ScoredEvent] = []
     for row in payload["results"]:
-        ev_data = dict(row["event"])
+        ev_data = _known(Event, row["event"])
         for f in _DATE_FIELDS:
             if ev_data.get(f):
                 ev_data[f] = date.fromisoformat(ev_data[f])
         out.append(
             ScoredEvent(
                 event=Event(**ev_data),
-                breakdown=ScoreBreakdown(**row["breakdown"]),
+                breakdown=ScoreBreakdown(**_known(ScoreBreakdown,
+                                                  row["breakdown"])),
             )
         )
     return out

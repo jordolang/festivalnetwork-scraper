@@ -115,3 +115,20 @@ def test_persist_roundtrip(tmp_path):
     assert loaded[0].event.start_date == original[0].event.start_date
     assert loaded[0].breakdown.cost_per_jar == original[0].breakdown.cost_per_jar
     assert loaded[1].breakdown.attendance_estimated
+
+
+def test_load_ignores_fields_from_another_build(tmp_path):
+    """A results file written by a build that scores with extra fields
+    (stock limits) must still open rather than leave the window empty."""
+    import json
+
+    path = persist.save_results([scored()], tmp_path / "results.json")
+    payload = json.loads(path.read_text())
+    payload["results"][0]["breakdown"].update(
+        stock_limited=True, stock_ceiling=40, stock_on_hand=12,
+        demand_units=55)
+    payload["results"][0]["event"]["future_field"] = "x"
+    path.write_text(json.dumps(payload))
+    loaded = persist.load_results(path)
+    assert len(loaded) == 1
+    assert not hasattr(loaded[0].breakdown, "stock_limited")
